@@ -43,4 +43,4 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 
 Built with passion for secure infrastructure.
 
-One final reminder before you push this to a public repository:
+
