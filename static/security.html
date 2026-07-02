@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Security & Privacy — STRIDE Threat Modeler</title>
+  <style>
+    body{font-family:system-ui,sans-serif;max-width:760px;margin:40px auto;padding:0 20px;color:#1a1a1a;line-height:1.6}
+    h1{margin-bottom:4px}h2{margin-top:28px}.muted{color:#666}
+    ul{padding-left:20px}code{background:#f5f6fa;padding:2px 5px;border-radius:4px}
+  </style>
+</head>
+<body>
+  <h1>Security &amp; Privacy</h1>
+  <p class="muted">How we protect your data. Last updated: [DATE].</p>
+
+  <h2>Your data is not used to train AI models</h2>
+  <p>Your architecture description is sent to Google's Gemini API solely to produce your result.
+     Per Google's API terms, data submitted through the Gemini API is <b>not used to train their models</b>.
+     We do not use your data to train any model, and we do not sell your data.</p>
+
+  <h2>Tenant isolation</h2>
+  <p>Each account's data is isolated at the database level using PostgreSQL Row-Level Security.
+     Users can only ever access their own data — enforced by the database itself.</p>
+
+  <h2>Encryption</h2>
+  <ul>
+    <li>All data encrypted in transit (TLS/HTTPS).</li>
+    <li>All data encrypted at rest (managed PostgreSQL via Supabase).</li>
+  </ul>
+
+  <h2>Authentication</h2>
+  <p>We authenticate via Google OAuth. We never see or store your password.
+     Sessions use signed, expiring JWTs verified on every request.</p>
+
+  <h2>Audit logging</h2>
+  <p>Every action that creates, approves, rejects, or deletes data is recorded in an append-only audit log.</p>
+
+  <h2>Human-in-the-loop</h2>
+  <p>AI-generated threats are <b>proposals</b>. Nothing counts as compliance evidence until a human on your
+     team explicitly approves it. AI is an assistant, not the authority.</p>
+
+  <h2>Data deletion</h2>
+  <p>You can delete any project at any time. Deleting a project permanently removes its threats and mitigations.</p>
+
+  <h2>Subprocessors</h2>
+  <ul>
+    <li><b>Supabase</b> — database, authentication (SOC 2 compliant)</li>
+    <li><b>Google Gemini API</b> — AI inference (does not train on API data)</li>
+    <li><b>Render</b> — application hosting (SOC 2 compliant)</li>
+  </ul>
+
+  <h2>Compliance posture</h2>
+  <p>This product is built to align with SOC 2 controls. We are <b>SOC 2-ready</b>;
+     formal certification is on our roadmap.</p>
+
+  <h2>Reporting a vulnerability</h2>
+  <p>Email <code>[YOUR_SECURITY_EMAIL]</code>. We appreciate responsible disclosure.</p>
+</body>
+</html>

@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>STRIDE Threat Modeler</title>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <style>
+    body{font-family:system-ui,sans-serif;max-width:960px;margin:24px auto;padding:0 20px;color:#1a1a1a}
+    h1{margin-bottom:2px}.muted{color:#666;font-size:14px}
+    textarea{width:100%;height:120px;padding:10px;border:1px solid #ccc;border-radius:6px}
+    input,select{padding:8px;border:1px solid #ccc;border-radius:6px;margin:4px 0}
+    input.full{width:100%}
+    button{padding:9px 16px;margin:4px 4px 4px 0;cursor:pointer;border:1px solid #333;border-radius:6px;background:#fff}
+    button.primary{background:#2c3e50;color:#fff;border-color:#2c3e50}
+    button.sm{padding:4px 10px;font-size:13px}
+    .card{border:1px solid #ddd;padding:14px;margin:12px 0;border-radius:8px;background:#fff}
+    .threat.rejected{opacity:.4}.threat.accepted{border-color:#27ae60}.threat.pending{border-color:#f39c12}
+    .critical{border-left:6px solid #c0392b}.high{border-left:6px solid #e67e22}
+    .medium{border-left:6px solid #f1c40f}.low{border-left:6px solid #27ae60}
+    .soc2{color:#2980b9;font-size:13px}
+    .badge{font-size:12px;padding:2px 8px;border-radius:10px;color:#fff}
+    .b-pending{background:#f39c12}.b-accepted{background:#27ae60}.b-rejected{background:#c0392b}
+    .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+    .dash{display:flex;gap:16px;flex-wrap:wrap}
+    .metric{background:#f5f6fa;border-radius:8px;padding:16px;min-width:120px;text-align:center}
+    .metric b{font-size:26px;display:block}
+    .bar{height:14px;border-radius:7px;background:#eee;overflow:hidden;margin:8px 0}
+    .bar>span{display:block;height:100%;background:#27ae60}
+    .drop{border:2px dashed #aaa;border-radius:8px;padding:24px;text-align:center;color:#666;cursor:pointer}
+    footer{margin-top:40px;font-size:13px;color:#888}
+  </style>
+</head>
+<body>
+  <h1>STRIDE Threat Modeler</h1>
+  <p class="muted">Upload your infrastructure → one click → auditor-ready threat model + compliance dashboard.
+     AI threats start as <b>pending</b> until you approve them.</p>
+  <div id="authbar"></div>
+
+  <div class="card">
+    <div class="row">
+      <button class="primary" onclick="tab('file')">Upload Config (One-Click)</button>
+      <button onclick="tab('text')">Describe Manually</button>
+    </div>
+    <div id="tab-file">
+      <input id="fname" class="full" placeholder="Project name" maxlength="200">
+      <div class="drop" id="drop">Drop a Terraform / Kubernetes / Dockerfile / docker-compose file here, or click to select
+        <input type="file" id="fileInput" style="display:none">
+      </div>
+      <p class="muted" id="fstatus"></p>
+    </div>
+    <div id="tab-text" style="display:none">
+      <input id="name" class="full" placeholder="Project name" maxlength="200">
+      <textarea id="desc" placeholder="Describe your system architecture..." maxlength="8000"></textarea>
+      <button class="primary" onclick="runText(false)">Generate (Free Demo)</button>
+      <button id="saveBtn" onclick="runText(true)">Sign in to Save + Review</button>
+    </div>
+  </div>
+
+  <div id="dashboard"></div>
+  <div id="results"></div>
+
+  <footer><a href="/security.html">Security &amp; Privacy</a></footer>
+
+  <script>
+    const SUPABASE_URL="YOUR_SUPABASE_URL";
+    const SUPABASE_ANON_KEY="YOUR_SUPABASE_ANON_KEY";
+    const sb=supabase.createClient(SUPABASE_URL,SUPABASE_ANON_KEY);
+    let session=null,currentPid=null;
+    const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    const AH=(json=true)=>{const h={"Authorization":"Bearer "+session.access_token};if(json)h["Content-Type"]="application/json";return h;};
+
+    function tab(t){document.getElementById("tab-file").style.display=t==="file"?"block":"none";
+      document.getElementById("tab-text").style.display=t==="text"?"block":"none";}
+
+    async function refresh(){
+      const {data}=await sb.auth.getSession();session=data.session;
+      const bar=document.getElementById("authbar");
+      if(session){bar.innerHTML=`<div class="muted">Signed in as ${esc(session.user.email)} <button class="sm" id="lo">Logout</button></div>`;
+        document.getElementById("lo").onclick=logout;
+        document.getElementById("saveBtn").innerText="Generate + Save";}
+      else{bar.textContent="";document.getElementById("saveBtn").innerText="Sign in to Save + Review";}
+    }
+    async function login(){await sb.auth.signInWithOAuth({provider:"google",options:{redirectTo:location.origin}});}
+    async function logout(){await sb.auth.signOut();currentPid=null;refresh();
+      document.getElementById("results").innerHTML="";document.getElementById("dashboard").innerHTML="";}
+
+    const drop=document.getElementById("drop"),fileInput=document.getElementById("fileInput");
+    drop.onclick=()=>fileInput.click();
+    drop.ondragover=e=>{e.preventDefault();drop.style.background="#f0f8ff";};
+    drop.ondragleave=()=>drop.style.background="";
+    drop.ondrop=e=>{e.preventDefault();drop.style.background="";handleFile(e.dataTransfer.files[0]);};
+    fileInput.onchange=e=>handleFile(e.target.files[0]);
+
+    async function handleFile(file){
+      if(!file)return;
+      if(!session){alert("Sign in to analyze your config.");return login();}
+      const fs=document.getElementById("fstatus");fs.textContent="Analyzing "+file.name+"...";
+      const fd=new FormData();fd.append("file",file);
+      const nm=document.getElementById("fname").value||file.name;
+      const res=await fetch(`/api/generate-from-file?name=${encodeURIComponent(nm)}`,
+        {method:"POST",headers:{"Authorization":"Bearer "+session.access_token},body:fd});
+      if(!res.ok){const e=await res.json().catch(()=>({}));fs.textContent="Error: "+(e.detail||res.status);return;}
+      const out=await res.json();currentPid=out.project_id;fs.textContent="Done.";await loadProject();
+    }
+
+    async function runText(save){
+      const body={name:document.getElementById("name").value||"Untitled",
+        architecture_description:document.getElementById("desc").value};
+      if(save&&!session)return login();
+      const url=save?"/api/generate":"/api/demo";
+      const headers=save?AH():{"Content-Type":"application/json"};
+      document.getElementById("results").textContent="Generating...";
+      const res=await fetch(url,{method:"POST",headers,body:JSON.stringify(body)});
+      if(!res.ok){const e=await res.json().catch(()=>({}));document.getElementById("results").textContent="Error: "+(e.detail||res.status);return;}
+      const out=await res.json();currentPid=out.project_id||null;
+      if(currentPid)await loadProject();else renderThreats(out.threat_model,null);
+    }
+
+    async function loadProject(){
+      if(!currentPid)return;
+      const [pRes,sRes]=await Promise.all([
+        fetch(`/api/projects/${currentPid}`,{headers:AH(false)}),
+        fetch(`/api/projects/${currentPid}/stats`,{headers:AH(false)})]);
+      const data=await pRes.json();const stats=await sRes.json();
+      renderDashboard(stats,currentPid);
+      renderThreats({system_summary:data.project.system_summary,threats:data.threats},currentPid);
+    }
+
+    function renderDashboard(s,pid){
+      const open=s.open_risk;
+      document.getElementById("dashboard").innerHTML=`
+      <div class="card">
+        <div class="row" style="justify-content:space-between">
+          <h3 style="margin:0">Compliance Readiness</h3>
+          <button class="primary" data-pdf="${esc(pid)}">Download Audit PDF</button>
+        </div>
+        <div class="bar"><span style="width:${s.readiness_score}%"></span></div>
+        <p class="muted">${s.readiness_score}% of approved risks resolved
+          ${s.accepted===0?'(approve threats below to begin)':''}</p>
+        <div class="dash">
+          <div class="metric"><b>${s.total_threats}</b>total</div>
+          <div class="metric"><b style="color:#f39c12">${s.pending}</b>pending review</div>
+          <div class="metric"><b>${s.accepted}</b>approved</div>
+          <div class="metric"><b>${s.resolved}</b>resolved</div>
+          <div class="metric"><b style="color:#c0392b">${open.Critical}</b>open critical</div>
+          <div class="metric"><b style="color:#e67e22">${open.High}</b>open high</div>
+        </div>
+        <p class="muted">SOC2 controls covered: ${s.soc2_controls_covered.map(esc).join(", ")||"none yet"}</p>
+      </div>`;
+    }
+
+    function renderThreats(model,pid){
+      let html=`<div class="card"><b>Summary:</b> ${esc(model.system_summary)}</div><h3>Threats</h3>`;
+      model.threats.forEach(t=>{
+        const canReview=pid&&t.id;
+        const st=t.status||'pending';
+        html+=`<div class="card threat ${esc(t.severity).toLowerCase()} ${esc(st)}">
+          <div class="row"><b>${esc(t.title)}</b>
+            <span class="badge b-${esc(st)}">${esc(st)}</span></div>
+          <div class="muted">${esc(t.category)} | ${esc(t.severity)} | ${esc(t.affected_component)}</div>
+          <div class="soc2">SOC2: ${esc(t.soc2_control||'')}${t.iso27001_control?(' | ISO: '+esc(t.iso27001_control)):''}</div>
+          <p>${esc(t.description)}</p>
+          <ul>${(t.mitigations||[]).map(m=>`<li>${esc(m.description)}</li>`).join("")}</ul>`;
+        if(canReview){
+          html+=`<div class="row">
+            <button class="sm" data-accept="${esc(t.id)}">Approve</button>
+            <button class="sm" data-reject="${esc(t.id)}">Reject</button>
+            <select class="sm" data-remediate="${esc(t.id)}">
+              <option value="not_started" ${t.remediation_status==='not_started'?'selected':''}>Not started</option>
+              <option value="in_progress" ${t.remediation_status==='in_progress'?'selected':''}>In progress</option>
+              <option value="resolved" ${t.remediation_status==='resolved'?'selected':''}>Resolved</option>
+            </select></div>`;
+        }
+        html+=`</div>`;
+      });
+      document.getElementById("results").innerHTML=html;
+    }
+
+    document.addEventListener("change",async e=>{
+      const sel=e.target.closest("select[data-remediate]");
+      if(sel&&session){
+        await fetch(`/api/threats/${encodeURIComponent(sel.dataset.remediate)}/remediation`,
+          {method:"PATCH",headers:AH(),body:JSON.stringify({status:sel.value})});
+        loadProject();
+      }
+    });
+
+    document.addEventListener("click",async e=>{
+      const t=e.target;
+      if(t.dataset.pdf&&session){
+        const res=await fetch(`/api/projects/${encodeURIComponent(t.dataset.pdf)}/pdf`,{headers:AH(false)});
+        if(!res.ok){alert("PDF failed");return;}
+        const b=await res.blob();const a=document.createElement("a");
+        a.href=URL.createObjectURL(b);a.download="audit-threat-model.pdf";a.click();return;
+      }
+      const status=t.dataset.accept?"accepted":t.dataset.reject?"rejected":null;
+      const sid=t.dataset.accept||t.dataset.reject;
+      if(status&&sid){
+        await fetch(`/api/threats/${encodeURIComponent(sid)}/status`,
+          {method:"PATCH",headers:AH(),body:JSON.stringify({status})});
+        loadProject();
+      }
+    });
+
+    sb.auth.onAuthStateChange(()=>refresh());refresh();
+  </script>
+</body>
+</html>

@@ -1,0 +1,29 @@
+gitignore
+# Secrets
+.env
+.env.local
+*.pem
+*.key
+service_account*.json
+
+# Secret baseline
+.secrets.baseline
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Python
+__pycache__/
+*.pyc
+venv/
+.venv/
+*.egg-info/
+
+# IDE
+.vscode/
+.idea/
+
+# Output artifacts
+*.pdf
+/uploads/
