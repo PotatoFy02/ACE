@@ -48,16 +48,31 @@ alter table threats enable row level security;
 alter table mitigations enable row level security;
 alter table audit_log enable row level security;
 
+drop policy if exists "own_projects" on projects;
 create policy "own_projects" on projects
     for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
 
+drop policy if exists "own_threats" on threats;
 create policy "own_threats" on threats
-    for all using (
+    for all
+    using (
+        exists (select 1 from projects p where p.id = threats.project_id and p.user_id = auth.uid())
+    )
+    with check (
         exists (select 1 from projects p where p.id = threats.project_id and p.user_id = auth.uid())
     );
 
+drop policy if exists "own_mitigations" on mitigations;
 create policy "own_mitigations" on mitigations
-    for all using (
+    for all
+    using (
+        exists (
+            select 1 from threats t
+            join projects p on p.id = t.project_id
+            where t.id = mitigations.threat_id and p.user_id = auth.uid()
+        )
+    )
+    with check (
         exists (
             select 1 from threats t
             join projects p on p.id = t.project_id
@@ -66,7 +81,11 @@ create policy "own_mitigations" on mitigations
     );
 
 revoke update, delete on audit_log from anon, authenticated;
+
+drop policy if exists "audit_insert" on audit_log;
 create policy "audit_insert" on audit_log
     for insert with check (auth.uid() = user_id);
+
+drop policy if exists "audit_read_own" on audit_log;
 create policy "audit_read_own" on audit_log
     for select using (auth.uid() = user_id);
