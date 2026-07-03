@@ -9,6 +9,8 @@ from slowapi import Limiter
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 
+# Core Ingestion & Engine Imports
+from github_import import fetch_iac_from_repo, GitHubImportError
 from generate import generate_threat_model, GenerationCapExceeded
 from auth import verify_token, get_bearer, try_decode
 from validators import validate_description, validate_name
@@ -17,16 +19,18 @@ from db import (save_threat_model, list_projects, get_project, delete_project,
                 count_projects, update_threat_status, update_remediation, project_stats)
 from pdf import build_pdf
 
+# Logging Setup
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("app")
 
+# Environment Configurations
 FREE_PROJECT_LIMIT = int(os.getenv("FREE_PROJECT_LIMIT", "3"))
 ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "http://localhost:8000").split(",")
 MAX_BODY = 25000
 MAX_UPLOAD = 120000
 ALLOWED_EXT = (".tf", ".hcl", ".yaml", ".yml", ".json", ".txt")
 
-
+# JWT/User Aware Rate Limiter Key Generation
 def rate_key(request: Request) -> str:
     auth = request.headers.get("authorization", "")
     if auth.startswith("Bearer "):
@@ -35,17 +39,16 @@ def rate_key(request: Request) -> str:
             return f"user:{payload['sub']}"
     return get_remote_address(request)
 
-
 limiter = Limiter(key_func=rate_key)
-app = FastAPI(title="STRIDE Threat Modeler", version="2.3.0")
+app = FastAPI(title="ACE", version="2.4.0")
 app.state.limiter = limiter
 
-
+# Global Exceptions Handlers
 @app.exception_handler(RateLimitExceeded)
 async def ratelimit_handler(request, exc):
     return JSONResponse(status_code=429, content={"detail": "Rate limit exceeded. Try later."})
 
-
+# CORS Middleware Configurations
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
@@ -53,15 +56,19 @@ app.add_middleware(
     allow_headers=["Authorization", "Content-Type"],
 )
 
-
+# HTTP Security Hardening Middleware
 @app.middleware("http")
 async def hardening(request: Request, call_next):
     cl = request.headers.get("content-length")
     ctype = request.headers.get("content-type", "")
     limit = MAX_UPLOAD if ctype.startswith("multipart/form-data") else MAX_BODY
+    
     if cl and cl.isdigit() and int(cl) > limit:
         return Response("Payload too large", status_code=413)
+        
     resp = await call_next(request)
+    
+    # Secure Headers Injections
     resp.headers["X-Content-Type-Options"] = "nosniff"
     resp.headers["X-Frame-Options"] = "DENY"
     resp.headers["Referrer-Policy"] = "no-referrer"
@@ -75,24 +82,26 @@ async def hardening(request: Request, call_next):
     )
     return resp
 
-
+# --- Pydantic Data Verification Models ---
 class GenerateRequest(BaseModel):
     name: str = Field("Untitled", max_length=200)
     architecture_description: str = Field(..., max_length=8000)
 
+class GithubImportRequest(BaseModel):
+    name: str = Field("Untitled", max_length=200)
+    repo_url: str = Field(..., max_length=300)
 
 class StatusUpdate(BaseModel):
     status: str = Field(..., pattern="^(pending|accepted|rejected)$")
 
-
 class RemediationUpdate(BaseModel):
     status: str = Field(..., pattern="^(not_started|in_progress|resolved)$")
 
+# --- Core API Routes Definitions ---
 
 @app.get("/api/health")
 def health():
     return {"status": "ok"}
-
 
 @app.post("/api/demo")
 @limiter.limit("3/hour")
@@ -107,7 +116,6 @@ def demo(request: Request, req: GenerateRequest):
     except Exception:
         log.exception("demo failed")
         raise HTTPException(500, "Internal error. Please try again.")
-
 
 @app.post("/api/generate")
 @limiter.limit("20/hour")
@@ -130,7 +138,6 @@ def generate(request: Request, req: GenerateRequest,
     except Exception:
         log.exception("generate failed")
         raise HTTPException(500, "Internal error. Please try again.")
-
 
 @app.post("/api/generate-from-file")
 @limiter.limit("20/hour")
@@ -155,8 +162,8 @@ async def generate_from_file(request: Request, file: UploadFile = File(...),
         raise HTTPException(400, "File must be UTF-8 text.")
 
     content = "".join(ch for ch in content if ch in ("\n", "\t") or ord(ch) >= 32)
-
     desc = validate_description(parse_iac(fname, content))
+    
     try:
         if count_projects(jwt) >= FREE_PROJECT_LIMIT:
             raise HTTPException(402, f"Free limit reached ({FREE_PROJECT_LIMIT}). Upgrade.")
@@ -173,6 +180,30 @@ async def generate_from_file(request: Request, file: UploadFile = File(...),
         log.exception("file generate failed")
         raise HTTPException(500, "Internal error.")
 
+@app.post("/api/generate-from-github")
+@limiter.limit("10/hour")
+def generate_from_github(request: Request, req: GithubImportRequest, 
+                         user=Depends(verify_token), jwt=Depends(get_bearer)):
+    try:
+        desc = validate_description(fetch_iac_from_repo(req.repo_url, parse_iac))
+    except GitHubImportError as e:
+        raise HTTPException(400, str(e))
+        
+    try:
+        if count_projects(jwt) >= FREE_PROJECT_LIMIT:
+            raise HTTPException(402, f"Free limit reached ({FREE_PROJECT_LIMIT}). Upgrade to save more.")
+        model = generate_threat_model(desc)
+        pid = save_threat_model(jwt, user["sub"], validate_name(req.name), desc, model)
+        return {"project_id": pid, "threat_model": model, "parsed_description": desc}
+    except HTTPException:
+        raise
+    except GenerationCapExceeded:
+        raise HTTPException(429, "Service is at capacity today. Please try again later.")
+    except ValueError:
+        raise HTTPException(502, "AI could not analyze this repository. Try a manual description.")
+    except Exception:
+        log.exception("github generate failed")
+        raise HTTPException(500, "Internal error.")
 
 @app.get("/api/projects")
 @limiter.limit("60/minute")
@@ -183,7 +214,6 @@ def projects(request: Request, user=Depends(verify_token), jwt=Depends(get_beare
         log.exception("list failed")
         raise HTTPException(500, "Internal error.")
 
-
 @app.get("/api/projects/{pid}")
 @limiter.limit("60/minute")
 def project(request: Request, pid: str, user=Depends(verify_token), jwt=Depends(get_bearer)):
@@ -191,7 +221,6 @@ def project(request: Request, pid: str, user=Depends(verify_token), jwt=Depends(
     if not data["project"]:
         raise HTTPException(404, "Not found.")
     return data
-
 
 @app.get("/api/projects/{pid}/stats")
 @limiter.limit("120/minute")
@@ -201,7 +230,6 @@ def stats(request: Request, pid: str, user=Depends(verify_token), jwt=Depends(ge
     except Exception:
         log.exception("stats failed")
         raise HTTPException(500, "Internal error.")
-
 
 @app.get("/api/projects/{pid}/pdf")
 @limiter.limit("30/minute")
@@ -219,7 +247,6 @@ def export_pdf(request: Request, pid: str, user=Depends(verify_token), jwt=Depen
     return Response(pdf, media_type="application/pdf",
                     headers={"Content-Disposition": 'attachment; filename="audit-threat-model.pdf"'})
 
-
 @app.patch("/api/threats/{tid}/status")
 @limiter.limit("120/minute")
 def set_status(request: Request, tid: str, body: StatusUpdate,
@@ -232,7 +259,6 @@ def set_status(request: Request, tid: str, body: StatusUpdate,
         log.exception("status failed")
         raise HTTPException(500, "Internal error.")
     return {"ok": True}
-
 
 @app.patch("/api/threats/{tid}/remediation")
 @limiter.limit("120/minute")
@@ -247,7 +273,6 @@ def set_remediation(request: Request, tid: str, body: RemediationUpdate,
         raise HTTPException(500, "Internal error.")
     return {"ok": True}
 
-
 @app.delete("/api/projects/{pid}")
 @limiter.limit("30/minute")
 def remove(request: Request, pid: str, user=Depends(verify_token), jwt=Depends(get_bearer)):
@@ -258,5 +283,5 @@ def remove(request: Request, pid: str, user=Depends(verify_token), jwt=Depends(g
         raise HTTPException(500, "Internal error.")
     return {"deleted": pid}
 
-
+# Fallback Routing for Client Static Assets (Must be mounted last)
 app.mount("/", StaticFiles(directory="static", html=True), name="static")
