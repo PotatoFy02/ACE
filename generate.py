@@ -1,6 +1,7 @@
 import os
 import time
 import threading
+import logging
 from enum import Enum
 from typing import List
 from dotenv import load_dotenv
@@ -13,12 +14,15 @@ if not os.getenv("GEMINI_API_KEY"):
     raise RuntimeError("GEMINI_API_KEY not set")
 client = genai.Client()
 
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.5-flash")
 DAILY_GENERATION_CAP = int(os.getenv("DAILY_GENERATION_CAP", "500"))
 GEMINI_TIMEOUT_MS = int(os.getenv("GEMINI_TIMEOUT_MS", "45000"))
 
 _lock = threading.Lock()
 _gen_count = 0
 _window_start = time.time()
+
+log = logging.getLogger("app")
 
 
 class GenerationCapExceeded(Exception):
@@ -93,7 +97,7 @@ def generate_threat_model(architecture_description: str) -> ThreatModel:
     _check_cap()
     try:
         response = client.models.generate_content(
-            model="gemini-2.5-flash",
+            model=GEMINI_MODEL,
             contents=f"System architecture to analyze:\n\n{architecture_description}",
             config=types.GenerateContentConfig(
                 system_instruction=SYSTEM_PROMPT,
@@ -106,7 +110,8 @@ def generate_threat_model(architecture_description: str) -> ThreatModel:
     except GenerationCapExceeded:
         raise
     except Exception as e:
-        raise ValueError(f"LLM request failed: {type(e).__name__}")
+        log.exception("Gemini call failed")
+        raise ValueError(f"LLM request failed: {type(e).__name__}: {str(e)[:200]}")
 
     if response.parsed is None:
         raise ValueError("Model returned no valid structured output.")
