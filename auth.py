@@ -4,6 +4,7 @@ import jwt
 from jwt import PyJWKClient
 from fastapi import Header, HTTPException, Depends
 from dotenv import load_dotenv
+from supabase import create_client, Client
 
 load_dotenv()
 
@@ -11,6 +12,14 @@ log = logging.getLogger("auth")
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_JWT_SECRET = os.getenv("SUPABASE_JWT_SECRET")
+SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
+
+
+OWNER_EMAILS = {
+    e.strip().lower()
+    for e in os.getenv("OWNER_EMAILS", "").split(",")
+    if e.strip()
+}
 
 if not SUPABASE_URL:
     raise RuntimeError("SUPABASE_URL not set")
@@ -18,6 +27,23 @@ if not SUPABASE_URL:
 # The public keys endpoint for verifying new-style (ES256/RS256) tokens
 JWKS_URL = f"{SUPABASE_URL}/auth/v1/.well-known/jwks.json"
 _jwk_client = PyJWKClient(JWKS_URL)
+
+ROLE_RANK = {"viewer": 0, "member": 1, "admin": 2, "owner": 3}
+
+_admin_client: Client | None = None
+
+
+def _admin() -> Client:
+    """Service-role client. Bypasses RLS entirely - used ONLY for role
+    reads/writes. Never import this into db.py or any other business
+    logic; everything else stays on the least-privilege anon+JWT pattern
+    the rest of the app already uses."""
+    global _admin_client
+    if _admin_client is None:
+        if not SUPABASE_SERVICE_ROLE_KEY:
+            raise RuntimeError("SUPABASE_SERVICE_ROLE_KEY not set")
+        _admin_client = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
+    return _admin_client
 
 
 def decode_jwt(token: str) -> dict:
@@ -75,3 +101,39 @@ def verify_token(token: str = Depends(get_bearer)) -> dict:
     if not payload.get("sub"):
         raise HTTPException(401, "Invalid token subject.")
     return payload
+
+
+def is_owner(payload: dict) -> bool:
+    """Fast-path check against OWNER_EMAILS only - used for rate-limit
+    exemption where a DB round-trip per request isn't worth it. This is
+    NOT the source of truth for admin actions; use require_role() for
+    anything that grants real privilege, since a role can diverge from
+    OWNER_EMAILS after manual promotion/demotion via the profiles table."""
+    email = (payload or {}).get("email", "")
+    return bool(email) and email.strip().lower() in OWNER_EMAILS
+
+
+def get_user_role(user_id: str, email: str) -> str:
+    """Looks up (and lazily bootstraps) a user's role. Always reads from
+    the DB via the service-role client - never trusts a role claim from
+    the client itself."""
+    res = _admin().table("profiles").select("role").eq("id", user_id).execute()
+    if res.data:
+        return res.data[0]["role"]
+
+   
+    role = "owner" if email.strip().lower() in OWNER_EMAILS else "member"
+    _admin().table("profiles").insert({
+        "id": user_id, "email": email, "role": role, "granted_by": None,
+    }).execute()
+    return role
+
+
+def require_role(minimum: str):
+    """FastAPI dependency factory. Usage: Depends(require_role('admin'))"""
+    def _dep(user: dict = Depends(verify_token)):
+        role = get_user_role(user["sub"], user.get("email", ""))
+        if ROLE_RANK.get(role, -1) < ROLE_RANK[minimum]:
+            raise HTTPException(403, f"Requires {minimum} role or higher.")
+        return role
+    return _dep
