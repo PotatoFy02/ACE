@@ -1,6 +1,9 @@
 import os
 import re
+import logging
 import requests
+
+log = logging.getLogger("github_import")
 
 GITHUB_API = "https://api.github.com"
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN", "")
@@ -9,6 +12,12 @@ MAX_FILES = 25
 MAX_TOTAL_BYTES = 7000
 MAX_SINGLE_FILE = 60000
 TIMEOUT = 10
+MIN_QUOTA_REMAINING = 5  # abort before spending the last few requests app-wide
+
+# Scopes a read-only public-repo importer never needs. If GITHUB_TOKEN carries
+# any of these, it's over-scoped for what ACE actually does - re-issue as a
+# fine-grained PAT limited to public repo contents (read-only).
+RISKY_SCOPES = {"repo", "admin:org", "delete_repo", "admin:repo_hook", "workflow"}
 
 REPO_URL_RE = re.compile(
     r"^https://github\.com/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+?)(?:\.git)?/?$"
@@ -26,11 +35,65 @@ def _headers():
     return h
 
 
+def verify_pat_scope() -> None:
+    """Call once at startup. Logs the ACTUAL granted scope of GITHUB_TOKEN
+    instead of leaving it unverified. GitHub returns the token's scopes in
+    the X-OAuth-Scopes response header on any authenticated request - this
+    call does not consume core rate-limit quota."""
+    if not GITHUB_TOKEN:
+        log.warning(
+            "GITHUB_TOKEN not set - running unauthenticated (60 req/hr, "
+            "shared across ALL users of this app)."
+        )
+        return
+    try:
+        r = requests.get(f"{GITHUB_API}/rate_limit", headers=_headers(), timeout=TIMEOUT)
+    except requests.RequestException as e:
+        log.warning("Could not verify GITHUB_TOKEN scope at startup: %r", e)
+        return
+    scopes_header = r.headers.get("X-OAuth-Scopes", "")
+    granted = {s.strip() for s in scopes_header.split(",") if s.strip()}
+    if not scopes_header:
+        log.info(
+            "GITHUB_TOKEN has no classic OAuth scopes (likely a fine-grained "
+            "PAT, or a token with zero scopes). This is the minimal footprint "
+            "ACE needs for reading public repos."
+        )
+    elif granted & RISKY_SCOPES:
+        log.warning(
+            "GITHUB_TOKEN scope is broader than ACE needs: %s. ACE only reads "
+            "public repo file trees/contents - re-issue as a fine-grained PAT "
+            "scoped to 'Public Repositories (read-only)' to shrink blast radius.",
+            sorted(granted & RISKY_SCOPES),
+        )
+    else:
+        log.info("GITHUB_TOKEN scopes: %s", sorted(granted))
+
+
 def _check_rate_limit(r):
     if r.status_code == 403 and r.headers.get("X-RateLimit-Remaining") == "0":
         raise GitHubImportError(
             "GitHub API rate limit hit. Try again later." if GITHUB_TOKEN
             else "GitHub API rate limit hit (unauthenticated). Set GITHUB_TOKEN to raise the limit."
+        )
+
+
+def _check_quota_before_fetch():
+    """App-wide guard: the whole app shares ONE GITHUB_TOKEN quota across all
+    users. Check remaining quota before spending it on a multi-request import,
+    rather than letting one user's request burn the last few calls and hand
+    every other concurrent user a cryptic mid-request 403."""
+    try:
+        r = requests.get(f"{GITHUB_API}/rate_limit", headers=_headers(), timeout=TIMEOUT)
+    except requests.RequestException:
+        return  # fail open - a failed pre-check shouldn't block imports entirely
+    if r.status_code != 200:
+        return
+    remaining = r.json().get("resources", {}).get("core", {}).get("remaining", 999)
+    if remaining < MIN_QUOTA_REMAINING:
+        raise GitHubImportError(
+            "GitHub API quota for this app is nearly exhausted right now "
+            "(shared across all users). Please try again in a few minutes."
         )
 
 
@@ -71,6 +134,7 @@ def _is_iac_file(path: str) -> bool:
 
 def fetch_iac_from_repo(url: str, parse_fn) -> str:
     owner, repo = parse_repo_url(url)
+    _check_quota_before_fetch()
     branch = _get_default_branch(owner, repo)
     tree = _list_tree(owner, repo, branch)
 
