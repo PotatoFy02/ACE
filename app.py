@@ -10,9 +10,9 @@ from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 
 # Core Ingestion & Engine Imports
-from github_import import fetch_iac_from_repo, GitHubImportError
+from github_import import fetch_iac_from_repo, GitHubImportError, verify_pat_scope
 from generate import generate_threat_model, GenerationCapExceeded
-from auth import verify_token, get_bearer, try_decode
+from auth import verify_token, get_bearer, try_decode, is_owner, require_role, ROLE_RANK, _admin
 from validators import validate_description, validate_name
 from iac_parser import parse_iac
 from db import (save_threat_model, list_projects, get_project, delete_project,
@@ -39,9 +39,20 @@ def rate_key(request: Request) -> str:
             return f"user:{payload['sub']}"
     return get_remote_address(request)
 
+
+def _request_is_owner(request: Request) -> bool:
+    """Used as slowapi's exempt_when - runs the same JWT decode already
+    happening in rate_key, so this costs nothing extra per request."""
+    auth = request.headers.get("authorization", "")
+    if not auth.startswith("Bearer "):
+        return False
+    payload = try_decode(auth.split(" ", 1)[1].strip())
+    return bool(payload) and is_owner(payload)
+
 limiter = Limiter(key_func=rate_key)
 app = FastAPI(title="ACE", version="2.4.0")
 app.state.limiter = limiter
+verify_pat_scope()
 
 # Global Exceptions Handlers
 @app.exception_handler(RateLimitExceeded)
@@ -62,12 +73,12 @@ async def hardening(request: Request, call_next):
     cl = request.headers.get("content-length")
     ctype = request.headers.get("content-type", "")
     limit = MAX_UPLOAD if ctype.startswith("multipart/form-data") else MAX_BODY
-    
+
     if cl and cl.isdigit() and int(cl) > limit:
         return Response("Payload too large", status_code=413)
-        
+
     resp = await call_next(request)
-    
+
     # Secure Headers Injections
     resp.headers["X-Content-Type-Options"] = "nosniff"
     resp.headers["X-Frame-Options"] = "DENY"
@@ -97,6 +108,9 @@ class StatusUpdate(BaseModel):
 class RemediationUpdate(BaseModel):
     status: str = Field(..., pattern="^(not_started|in_progress|resolved)$")
 
+class RoleUpdateRequest(BaseModel):
+    role: str
+
 # --- Core API Routes Definitions ---
 
 @app.get("/api/health")
@@ -118,13 +132,13 @@ def demo(request: Request, req: GenerateRequest):
         raise HTTPException(500, "Internal error. Please try again.")
 
 @app.post("/api/generate")
-@limiter.limit("20/hour")
+@limiter.limit("20/hour", exempt_when=_request_is_owner)
 def generate(request: Request, req: GenerateRequest,
              user=Depends(verify_token), jwt=Depends(get_bearer)):
     desc = validate_description(req.architecture_description)
     name = validate_name(req.name)
     try:
-        if count_projects(jwt) >= FREE_PROJECT_LIMIT:
+        if not _request_is_owner(request) and count_projects(jwt) >= FREE_PROJECT_LIMIT:
             raise HTTPException(402, f"Free limit reached ({FREE_PROJECT_LIMIT}). Upgrade to save more.")
         model = generate_threat_model(desc)
         pid = save_threat_model(jwt, user["sub"], name, desc, model)
@@ -140,7 +154,7 @@ def generate(request: Request, req: GenerateRequest,
         raise HTTPException(500, "Internal error. Please try again.")
 
 @app.post("/api/generate-from-file")
-@limiter.limit("20/hour")
+@limiter.limit("20/hour", exempt_when=_request_is_owner)
 async def generate_from_file(request: Request, file: UploadFile = File(...),
                              name: str = "Untitled",
                              user=Depends(verify_token), jwt=Depends(get_bearer)):
@@ -163,9 +177,9 @@ async def generate_from_file(request: Request, file: UploadFile = File(...),
 
     content = "".join(ch for ch in content if ch in ("\n", "\t") or ord(ch) >= 32)
     desc = validate_description(parse_iac(fname, content))
-    
+
     try:
-        if count_projects(jwt) >= FREE_PROJECT_LIMIT:
+        if not _request_is_owner(request) and count_projects(jwt) >= FREE_PROJECT_LIMIT:
             raise HTTPException(402, f"Free limit reached ({FREE_PROJECT_LIMIT}). Upgrade.")
         model = generate_threat_model(desc)
         pid = save_threat_model(jwt, user["sub"], validate_name(name), desc, model)
@@ -181,16 +195,16 @@ async def generate_from_file(request: Request, file: UploadFile = File(...),
         raise HTTPException(500, "Internal error.")
 
 @app.post("/api/generate-from-github")
-@limiter.limit("10/hour")
-def generate_from_github(request: Request, req: GithubImportRequest, 
+@limiter.limit("10/hour", exempt_when=_request_is_owner)
+def generate_from_github(request: Request, req: GithubImportRequest,
                          user=Depends(verify_token), jwt=Depends(get_bearer)):
     try:
         desc = validate_description(fetch_iac_from_repo(req.repo_url, parse_iac))
     except GitHubImportError as e:
         raise HTTPException(400, str(e))
-        
+
     try:
-        if count_projects(jwt) >= FREE_PROJECT_LIMIT:
+        if not _request_is_owner(request) and count_projects(jwt) >= FREE_PROJECT_LIMIT:
             raise HTTPException(402, f"Free limit reached ({FREE_PROJECT_LIMIT}). Upgrade to save more.")
         model = generate_threat_model(desc)
         pid = save_threat_model(jwt, user["sub"], validate_name(req.name), desc, model)
@@ -282,6 +296,15 @@ def remove(request: Request, pid: str, user=Depends(verify_token), jwt=Depends(g
         log.exception("delete failed")
         raise HTTPException(500, "Internal error.")
     return {"deleted": pid}
+
+@app.post("/api/admin/roles/{target_user_id}")
+@limiter.limit("30/hour")
+def set_user_role(request: Request, target_user_id: str, body: RoleUpdateRequest,
+                   _requester_role: str = Depends(require_role("owner"))):
+    if body.role not in ROLE_RANK:
+        raise HTTPException(400, f"Invalid role. Must be one of {list(ROLE_RANK)}")
+    _admin().table("profiles").update({"role": body.role}).eq("id", target_user_id).execute()
+    return {"status": "updated", "target_user_id": target_user_id, "role": body.role}
 
 # Fallback Routing for Client Static Assets (Must be mounted last)
 app.mount("/", StaticFiles(directory="static", html=True), name="static")
