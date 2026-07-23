@@ -1,0 +1,23 @@
+{
+  "service_name": "user-auth-service",
+  "language": "python",
+  "commit_sha": "a1b2c3d4e5f6",
+  "sdk_calls": [
+    {
+      "service": "s3",
+      "action": "GetObject",
+      "action_iam": "s3:GetObject",
+      "resources": ["arn:aws:s3:::my-bucket/*"],
+      "resources_wildcard": false,
+      "confidence": "high"
+    },
+    {
+      "service": "dynamodb",
+      "action": "PutItem",
+      "action_iam": "dynamodb:PutItem",
+      "resources": ["arn:aws:dynamodb:*:*:table/users-table"],
+      "resources_wildcard": false,
+      "confidence": "medium"
+    }
+  ]
+}

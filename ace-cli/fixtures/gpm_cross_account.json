@@ -1,0 +1,21 @@
+{
+  "role_name": "billing-worker-role",
+  "role_arn": "arn:aws:iam::111111111111:role/billing-worker-role",
+  "created_by": "ops@company.com",
+  "last_modified_pr": "github.com/org/repo/pull/98",
+  "attached_policies": [
+    {
+      "policy_arn": "arn:aws:iam::111111111111:policy/AssumeCrossAccountRole",
+      "statements": [
+        {
+          "effect": "Allow",
+          "actions": ["sts:AssumeRole"],
+          "actions_expanded": ["sts:AssumeRole"],
+          "actions_wildcard": false,
+          "resources": ["arn:aws:iam::222222222222:role/downstream-s3-role"],
+          "resources_wildcard": false
+        }
+      ]
+    }
+  ]
+}

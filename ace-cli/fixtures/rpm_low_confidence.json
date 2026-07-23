@@ -1,0 +1,15 @@
+{
+  "service_name": "billing-worker",
+  "language": "python",
+  "commit_sha": "deadbeef1234",
+  "sdk_calls": [
+    {
+      "service": "unknown",
+      "action": "unknown",
+      "action_iam": "unknown:unknown",
+      "resources": [],
+      "resources_wildcard": false,
+      "confidence": "low"
+    }
+  ]
+}

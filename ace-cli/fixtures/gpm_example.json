@@ -1,0 +1,21 @@
+{
+  "role_name": "user-auth-lambda-role",
+  "role_arn": "arn:aws:iam::123456789:role/user-auth-lambda-role",
+  "created_by": "dev@company.com",
+  "last_modified_pr": "github.com/org/repo/pull/142",
+  "attached_policies": [
+    {
+      "policy_arn": "arn:aws:iam::*:policy/LambdaS3FullAccess",
+      "statements": [
+        {
+          "effect": "Allow",
+          "actions": ["s3:*"],
+          "actions_expanded": ["s3:GetObject", "s3:DeleteBucket", "s3:PutObject"],
+          "actions_wildcard": true,
+          "resources": ["*"],
+          "resources_wildcard": true
+        }
+      ]
+    }
+  ]
+}
