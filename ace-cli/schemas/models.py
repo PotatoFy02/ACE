@@ -49,3 +49,35 @@ class GPM(BaseModel):
     created_by: str | None = None
     last_modified_pr: str | None = None
     attached_policies: list[AttachedPolicy]
+
+
+class Severity(str, Enum):
+    HIGH = "high"
+    MEDIUM = "medium"
+    LOW = "low"
+
+class OverPrivilegeType(str, Enum):
+    ACTION = "action"
+    RESOURCE = "resource"
+
+class MatchMethod(str, Enum):
+    FUZZY_NAME = "fuzzy_name"
+    MANIFEST = "manifest"
+    AMBIGUOUS = "ambiguous"
+
+class DeltaEntry(BaseModel):
+    action_iam: str
+    over_privilege_type: OverPrivilegeType
+    severity: Severity
+    confidence: Confidence
+    reason: str
+
+class DeltaResult(BaseModel):
+    role_arn: str
+    role_name: str
+    commit_sha: str
+    matched_by: MatchMethod
+    rpm_service_name: str
+    excess: list[DeltaEntry]
+    requires_human_review: bool
+    patch_risk: Literal["green", "yellow", "red"]   
