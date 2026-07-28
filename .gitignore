@@ -37,7 +37,7 @@ ACE_upload.zip
 # Spike / local testing directories
 phase1_spike/
 
-# Real repo clones — never commit these
+# repo clones 
 test_repos/
 
 # Delta Engine / parser debug scripts

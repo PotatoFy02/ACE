@@ -18,6 +18,7 @@ from iac_parser import parse_iac
 from db import (save_threat_model, list_projects, get_project, delete_project,
                 count_projects, update_threat_status, update_remediation, project_stats)
 from pdf import build_pdf
+from webhook import router as webhook_router
 
 # Logging Setup
 logging.basicConfig(level=logging.INFO)
@@ -41,8 +42,6 @@ def rate_key(request: Request) -> str:
 
 
 def _request_is_owner(request: Request) -> bool:
-    """Used as slowapi's exempt_when - runs the same JWT decode already
-    happening in rate_key, so this costs nothing extra per request."""
     auth = request.headers.get("authorization", "")
     if not auth.startswith("Bearer "):
         return False
@@ -52,6 +51,7 @@ def _request_is_owner(request: Request) -> bool:
 limiter = Limiter(key_func=rate_key)
 app = FastAPI(title="ACE", version="2.4.0")
 app.state.limiter = limiter
+app.include_router(webhook_router)
 verify_pat_scope()
 
 # Global Exceptions Handlers
@@ -79,7 +79,6 @@ async def hardening(request: Request, call_next):
 
     resp = await call_next(request)
 
-    # Secure Headers Injections
     resp.headers["X-Content-Type-Options"] = "nosniff"
     resp.headers["X-Frame-Options"] = "DENY"
     resp.headers["Referrer-Policy"] = "no-referrer"

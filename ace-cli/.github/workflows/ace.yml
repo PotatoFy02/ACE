@@ -1,0 +1,106 @@
+name: ACE — Privilege Analysis
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '**.py'
+      - '**.tf'
+
+jobs:
+  analyze:
+    name: Analyze IAM Privileges
+    runs-on: ubuntu-latest
+
+    permissions:
+      pull-requests: write
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build ace-cli
+        run: docker build -t ace-cli ./ace-cli
+
+      - name: Run ACE analysis
+        run: |
+          docker run ace-cli analyze \
+            --file ace-cli/test_samples/sample_lambda.py \
+            --tf ace-cli/test_samples/sample_role.tf \
+            --json > ace_output.json
+          cat ace_output.json
+
+      - name: Post PR comment
+        id: comment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            let output = '';
+            let redRoles = [];
+
+            const data = JSON.parse(fs.readFileSync('ace_output.json', 'utf8'));
+            const totalExcess = data.reduce((sum, d) => sum + d.excess.length, 0);
+            const highRisk = data.flatMap(d => d.excess)
+              .filter(e => e.severity === 'high')
+              .map(e => e.action_iam);
+
+            output += `## 🔐 ACE Privilege Analysis\n\n`;
+            output += `**${totalExcess} excess permissions found**\n\n`;
+
+            if (highRisk.length > 0) {
+              output += `### 🔴 HIGH severity (remove immediately)\n`;
+              highRisk.forEach(a => output += `- \`${a}\`\n`);
+              output += '\n';
+            }
+
+            data.forEach(delta => {
+              output += `### Role: \`${delta.role_name}\`\n`;
+              output += `- Patch risk: **${delta.patch_risk.toUpperCase()}**\n`;
+              output += `- Excess permissions: ${delta.excess.length}\n`;
+              if (delta.patch_risk === 'red') {
+                redRoles.push(delta.role_arn);
+                output += `\n> ⚠️ To approve this patch, comment:\n`;
+                output += `> \`/ace approve ${{ github.sha }} ${delta.role_arn}\`\n`;
+              }
+            });
+
+            await github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: output
+            });
+
+            core.exportVariable('RED_ROLES', JSON.stringify(redRoles));
+
+      - name: Check approvals for red-risk roles
+        if: env.RED_ROLES != '[]' && env.RED_ROLES != ''
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: |
+          pip install requests --quiet
+          python - <<'EOF'
+          import json, sys, subprocess
+
+          roles = json.loads('${{ env.RED_ROLES }}')
+          sha = '${{ github.sha }}'
+          failed = []
+
+          for role_arn in roles:
+              result = subprocess.run(
+                  ['python', 'ace-cli/gate_approval.py', sha, role_arn],
+                  capture_output=True, text=True
+              )
+              print(result.stdout)
+              if result.returncode != 0:
+                  failed.append(role_arn)
+
+          if failed:
+              print('BLOCKED — unapproved red-risk roles:')
+              for r in failed:
+                  print(f'  {r}')
+              sys.exit(1)
+          EOF

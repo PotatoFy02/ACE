@@ -8,3 +8,6 @@ PyJWT==2.13.0
 reportlab==5.0.0
 slowapi==0.1.10
 python-multipart==0.0.32
+tree-sitter==0.26.0
+python-hcl2
+python-multipart==0.0.32
