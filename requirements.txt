@@ -11,3 +11,4 @@ python-multipart==0.0.32
 tree-sitter==0.26.0
 python-hcl2
 python-multipart==0.0.32
+pyyaml==6.0.3

@@ -18,7 +18,7 @@ from iac_parser import parse_iac
 from db import (save_threat_model, list_projects, get_project, delete_project,
                 count_projects, update_threat_status, update_remediation, project_stats)
 from pdf import build_pdf
-from webhook import router as webhook_router
+from webhook import router as webhook_router 
 
 # Logging Setup
 logging.basicConfig(level=logging.INFO)
