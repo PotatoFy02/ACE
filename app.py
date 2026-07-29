@@ -1,5 +1,8 @@
 import os
 import logging
+import sentry_sdk
+from sentry_sdk.integrations.fastapi import FastApiIntegration
+from sentry_sdk.integrations.starlette import StarletteIntegration
 from fastapi import FastAPI, HTTPException, Depends, Request, Response, UploadFile, File
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -18,11 +21,37 @@ from iac_parser import parse_iac
 from db import (save_threat_model, list_projects, get_project, delete_project,
                 count_projects, update_threat_status, update_remediation, project_stats)
 from pdf import build_pdf
-from webhook import router as webhook_router 
+from webhook import router as webhook_router
 
 # Logging Setup
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("app")
+
+# ── Sentry ────────────────────────────────────────────────────────────────────
+# Must initialise before FastAPI() is created so all routes are instrumented.
+# Guarded by env var — local runs without SENTRY_DSN are completely unaffected.
+_sentry_dsn = os.getenv("SENTRY_DSN")
+if _sentry_dsn:
+    sentry_sdk.init(
+        dsn=_sentry_dsn,
+        integrations=[
+            StarletteIntegration(transaction_style="endpoint"),
+            FastApiIntegration(transaction_style="endpoint"),
+        ],
+        # 10% of requests sampled for performance tracing.
+        # All errors/exceptions are captured regardless of this rate.
+        traces_sample_rate=0.1,
+        # Never send JWTs, IPs, or user tokens to Sentry.
+        # Critical for a security tool — PII must not leave the stack.
+        send_default_pii=False,
+        # Tag every Sentry event with the deployed branch.
+        # Lets you filter "is this error from main or a feature branch?"
+        environment=os.getenv("RENDER_GIT_BRANCH", "local"),
+    )
+    log.info("Sentry initialised (environment=%s)", os.getenv("RENDER_GIT_BRANCH", "local"))
+else:
+    log.warning("SENTRY_DSN not set — error tracking disabled")
+# ─────────────────────────────────────────────────────────────────────────────
 
 # Environment Configurations
 FREE_PROJECT_LIMIT = int(os.getenv("FREE_PROJECT_LIMIT", "3"))
@@ -30,6 +59,7 @@ ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "http://localhost:8000").split(",
 MAX_BODY = 25000
 MAX_UPLOAD = 120000
 ALLOWED_EXT = (".tf", ".hcl", ".yaml", ".yml", ".json", ".txt")
+
 
 # JWT/User Aware Rate Limiter Key Generation
 def rate_key(request: Request) -> str:
@@ -48,18 +78,26 @@ def _request_is_owner(request: Request) -> bool:
     payload = try_decode(auth.split(" ", 1)[1].strip())
     return bool(payload) and is_owner(payload)
 
+
 limiter = Limiter(key_func=rate_key)
-app = FastAPI(title="ACE", version="2.4.0")
+app = FastAPI(title="ACE", version="2.5.0")
 app.state.limiter = limiter
 app.include_router(webhook_router)
 verify_pat_scope()
 
-# Global Exceptions Handlers
+
+# ── Global Exception Handlers ─────────────────────────────────────────────────
+
 @app.exception_handler(RateLimitExceeded)
 async def ratelimit_handler(request, exc):
-    return JSONResponse(status_code=429, content={"detail": "Rate limit exceeded. Try later."})
+    return JSONResponse(
+        status_code=429,
+        content={"detail": "Rate limit exceeded. Try later."}
+    )
 
-# CORS Middleware Configurations
+
+# ── CORS Middleware ───────────────────────────────────────────────────────────
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
@@ -67,7 +105,9 @@ app.add_middleware(
     allow_headers=["Authorization", "Content-Type"],
 )
 
-# HTTP Security Hardening Middleware
+
+# ── HTTP Security Hardening Middleware ────────────────────────────────────────
+
 @app.middleware("http")
 async def hardening(request: Request, call_next):
     cl = request.headers.get("content-length")
@@ -92,29 +132,74 @@ async def hardening(request: Request, call_next):
     )
     return resp
 
-# --- Pydantic Data Verification Models ---
+
+# ── Pydantic Models ───────────────────────────────────────────────────────────
+
 class GenerateRequest(BaseModel):
     name: str = Field("Untitled", max_length=200)
     architecture_description: str = Field(..., max_length=8000)
+
 
 class GithubImportRequest(BaseModel):
     name: str = Field("Untitled", max_length=200)
     repo_url: str = Field(..., max_length=300)
 
+
 class StatusUpdate(BaseModel):
     status: str = Field(..., pattern="^(pending|accepted|rejected)$")
+
 
 class RemediationUpdate(BaseModel):
     status: str = Field(..., pattern="^(not_started|in_progress|resolved)$")
 
+
 class RoleUpdateRequest(BaseModel):
     role: str
 
-# --- Core API Routes Definitions ---
+
+# ── Routes ────────────────────────────────────────────────────────────────────
 
 @app.get("/api/health")
 def health():
-    return {"status": "ok"}
+    """
+    Basic liveness check.
+    Render and uptime monitors hit this to confirm the process is alive.
+    Does not check DB or external services — that is /api/health/deep.
+    """
+    return {"status": "ok", "version": "2.5.0"}
+
+
+@app.get("/api/health/deep")
+async def health_deep():
+    """
+    Deep health check — verifies Supabase connectivity.
+    Hit this during a demo or before a pilot to confirm the full stack is up.
+    Returns 503 if any dependency is down so load balancers can route around it.
+    """
+    import httpx
+    checks = {"api": "ok", "supabase": "unknown"}
+    status_code = 200
+
+    supabase_url = os.getenv("SUPABASE_URL", "")
+    supabase_key = os.getenv("SUPABASE_ANON_KEY", "")
+
+    if supabase_url and supabase_key:
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                r = await client.get(
+                    f"{supabase_url}/rest/v1/",
+                    headers={"apikey": supabase_key},
+                )
+            checks["supabase"] = "ok" if r.status_code < 500 else "degraded"
+        except Exception as e:
+            checks["supabase"] = f"unreachable: {e}"
+            status_code = 503
+    else:
+        checks["supabase"] = "not configured"
+        status_code = 503
+
+    return JSONResponse(status_code=status_code, content=checks)
+
 
 @app.post("/api/demo")
 @limiter.limit("3/hour")
@@ -129,6 +214,7 @@ def demo(request: Request, req: GenerateRequest):
     except Exception:
         log.exception("demo failed")
         raise HTTPException(500, "Internal error. Please try again.")
+
 
 @app.post("/api/generate")
 @limiter.limit("20/hour", exempt_when=_request_is_owner)
@@ -152,16 +238,20 @@ def generate(request: Request, req: GenerateRequest,
         log.exception("generate failed")
         raise HTTPException(500, "Internal error. Please try again.")
 
+
 @app.post("/api/generate-from-file")
 @limiter.limit("20/hour", exempt_when=_request_is_owner)
 async def generate_from_file(request: Request, file: UploadFile = File(...),
-                             name: str = "Untitled",
-                             user=Depends(verify_token), jwt=Depends(get_bearer)):
+                              name: str = "Untitled",
+                              user=Depends(verify_token), jwt=Depends(get_bearer)):
     fname = (file.filename or "config")[:100]
     lower = fname.lower()
     if not (lower == "dockerfile" or lower.endswith("dockerfile")
             or any(lower.endswith(e) for e in ALLOWED_EXT)):
-        raise HTTPException(400, "Unsupported file type. Allowed: .tf, .hcl, .yaml, .yml, .json, .txt, Dockerfile")
+        raise HTTPException(
+            400,
+            "Unsupported file type. Allowed: .tf, .hcl, .yaml, .yml, .json, .txt, Dockerfile"
+        )
 
     raw = await file.read()
     if len(raw) > 100000:
@@ -193,10 +283,11 @@ async def generate_from_file(request: Request, file: UploadFile = File(...),
         log.exception("file generate failed")
         raise HTTPException(500, "Internal error.")
 
+
 @app.post("/api/generate-from-github")
 @limiter.limit("10/hour", exempt_when=_request_is_owner)
 def generate_from_github(request: Request, req: GithubImportRequest,
-                         user=Depends(verify_token), jwt=Depends(get_bearer)):
+                          user=Depends(verify_token), jwt=Depends(get_bearer)):
     try:
         desc = validate_description(fetch_iac_from_repo(req.repo_url, parse_iac))
     except GitHubImportError as e:
@@ -218,6 +309,7 @@ def generate_from_github(request: Request, req: GithubImportRequest,
         log.exception("github generate failed")
         raise HTTPException(500, "Internal error.")
 
+
 @app.get("/api/projects")
 @limiter.limit("60/minute")
 def projects(request: Request, user=Depends(verify_token), jwt=Depends(get_bearer)):
@@ -227,6 +319,7 @@ def projects(request: Request, user=Depends(verify_token), jwt=Depends(get_beare
         log.exception("list failed")
         raise HTTPException(500, "Internal error.")
 
+
 @app.get("/api/projects/{pid}")
 @limiter.limit("60/minute")
 def project(request: Request, pid: str, user=Depends(verify_token), jwt=Depends(get_bearer)):
@@ -234,6 +327,7 @@ def project(request: Request, pid: str, user=Depends(verify_token), jwt=Depends(
     if not data["project"]:
         raise HTTPException(404, "Not found.")
     return data
+
 
 @app.get("/api/projects/{pid}/stats")
 @limiter.limit("120/minute")
@@ -244,21 +338,28 @@ def stats(request: Request, pid: str, user=Depends(verify_token), jwt=Depends(ge
         log.exception("stats failed")
         raise HTTPException(500, "Internal error.")
 
+
 @app.get("/api/projects/{pid}/pdf")
 @limiter.limit("30/minute")
 def export_pdf(request: Request, pid: str, user=Depends(verify_token), jwt=Depends(get_bearer)):
     data = get_project(jwt, pid)
     if not data["project"]:
         raise HTTPException(404, "Not found.")
-    model_json = {"system_summary": data["project"].get("system_summary", ""),
-                  "threats": data["threats"]}
+    model_json = {
+        "system_summary": data["project"].get("system_summary", ""),
+        "threats": data["threats"]
+    }
     try:
         pdf = build_pdf(data["project"]["name"], model_json)
     except Exception:
         log.exception("pdf failed")
         raise HTTPException(500, "Could not generate PDF.")
-    return Response(pdf, media_type="application/pdf",
-                    headers={"Content-Disposition": 'attachment; filename="audit-threat-model.pdf"'})
+    return Response(
+        pdf,
+        media_type="application/pdf",
+        headers={"Content-Disposition": 'attachment; filename="audit-threat-model.pdf"'}
+    )
+
 
 @app.patch("/api/threats/{tid}/status")
 @limiter.limit("120/minute")
@@ -273,6 +374,7 @@ def set_status(request: Request, tid: str, body: StatusUpdate,
         raise HTTPException(500, "Internal error.")
     return {"ok": True}
 
+
 @app.patch("/api/threats/{tid}/remediation")
 @limiter.limit("120/minute")
 def set_remediation(request: Request, tid: str, body: RemediationUpdate,
@@ -286,6 +388,7 @@ def set_remediation(request: Request, tid: str, body: RemediationUpdate,
         raise HTTPException(500, "Internal error.")
     return {"ok": True}
 
+
 @app.delete("/api/projects/{pid}")
 @limiter.limit("30/minute")
 def remove(request: Request, pid: str, user=Depends(verify_token), jwt=Depends(get_bearer)):
@@ -296,14 +399,16 @@ def remove(request: Request, pid: str, user=Depends(verify_token), jwt=Depends(g
         raise HTTPException(500, "Internal error.")
     return {"deleted": pid}
 
+
 @app.post("/api/admin/roles/{target_user_id}")
 @limiter.limit("30/hour")
 def set_user_role(request: Request, target_user_id: str, body: RoleUpdateRequest,
-                   _requester_role: str = Depends(require_role("owner"))):
+                  _requester_role: str = Depends(require_role("owner"))):
     if body.role not in ROLE_RANK:
         raise HTTPException(400, f"Invalid role. Must be one of {list(ROLE_RANK)}")
     _admin().table("profiles").update({"role": body.role}).eq("id", target_user_id).execute()
     return {"status": "updated", "target_user_id": target_user_id, "role": body.role}
+
 
 # Fallback Routing for Client Static Assets (Must be mounted last)
 app.mount("/", StaticFiles(directory="static", html=True), name="static")
