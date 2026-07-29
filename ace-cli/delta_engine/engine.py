@@ -33,11 +33,6 @@ def _get_granted_actions(gpm: GPM) -> set[str]:
 
 
 def _get_resource_scope_violations(rpm: RPM, gpm: GPM) -> list[DeltaEntry]:
-    """
-    Detect right action, wrong scope:
-    RPM calls s3:GetObject on specific bucket,
-    GPM grants s3:GetObject on *.
-    """
     entries = []
     rpm_non_wildcard = {
         call.action_iam
@@ -51,7 +46,6 @@ def _get_resource_scope_violations(rpm: RPM, gpm: GPM) -> list[DeltaEntry]:
                 continue
             if not stmt.resources_wildcard:
                 continue
-            # GPM grants wildcard resource for an action RPM uses on specific resource
             for action in stmt.actions_expanded:
                 if action in rpm_non_wildcard:
                     entries.append(DeltaEntry(
@@ -68,13 +62,17 @@ def _get_resource_scope_violations(rpm: RPM, gpm: GPM) -> list[DeltaEntry]:
     return entries
 
 
-def compute_delta(rpm: RPM, gpms: list[GPM]) -> DeltaResult:
+def compute_delta(
+    rpm: RPM,
+    gpms: list[GPM],
+    manifest: dict[str, str] | None = None,
+) -> DeltaResult:
     """
     Main entry point. Pairs one RPM with one GPM, computes P_excess.
+    Checks manifest first, fuzzy match as fallback.
     """
-    gpm, match_method = match_rpm_to_gpm(rpm, gpms)
+    gpm, match_method = match_rpm_to_gpm(rpm, gpms, manifest)
 
-    # Ambiguous match — cannot compute delta
     if gpm is None or match_method == MatchMethod.AMBIGUOUS:
         return DeltaResult(
             role_arn="unknown",
@@ -93,7 +91,6 @@ def compute_delta(rpm: RPM, gpms: list[GPM]) -> DeltaResult:
 
     entries: list[DeltaEntry] = []
 
-    # Action-level excess: granted but never called
     for action in excess_actions:
         entries.append(DeltaEntry(
             action_iam=action,
@@ -103,13 +100,10 @@ def compute_delta(rpm: RPM, gpms: list[GPM]) -> DeltaResult:
             reason=f"{action} is granted but never called by {rpm.service_name}"
         ))
 
-    # Resource-level excess: right action, scope too broad
     entries.extend(_get_resource_scope_violations(rpm, gpm))
 
-    # Confidence propagation
     requires_review = _has_low_confidence(rpm) or match_method == MatchMethod.AMBIGUOUS
 
-    # Patch risk
     if not entries:
         patch_risk = "green"
     elif requires_review:
@@ -129,9 +123,13 @@ def compute_delta(rpm: RPM, gpms: list[GPM]) -> DeltaResult:
     )
 
 
-def compute_all_deltas(rpm: RPM, gpms: list[GPM]) -> list[DeltaResult]:
+def compute_all_deltas(
+    rpm: RPM,
+    gpms: list[GPM],
+    manifest: dict[str, str] | None = None,
+) -> list[DeltaResult]:
     """
     Computes one DeltaResult per GPM role.
     Each role is evaluated independently against the same RPM.
     """
-    return [compute_delta(rpm, [gpm]) for gpm in gpms]
+    return [compute_delta(rpm, [gpm], manifest) for gpm in gpms]

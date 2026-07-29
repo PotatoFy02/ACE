@@ -10,6 +10,10 @@ Maintenance rules:
 Gap log (add entry when fixed):
   2026-07-25: added sns, sqs, ses, events, ssm, bedrock-agent-runtime
   2026-07-25: added dynamodb resource API (Table method)
+  2026-07-28: added textract, support, cloudformation
+  2026-07-28: added stepfunctions send_task_*, logs export tasks, cognito list_user_pool_clients
+  2026-07-28: skip lambda.get_waiter (SDK utility, not IAM action)
+  2026-07-28: skip bedrock-agentcore-control (too new, no public IAM docs)
 """
 
 IAM_ACTION_MAP: dict[str, dict[str, str]] = {
@@ -55,8 +59,7 @@ IAM_ACTION_MAP: dict[str, dict[str, str]] = {
         "transact_get_items":                   "dynamodb:TransactGetItems",
         "transact_write_items":                 "dynamodb:TransactWriteItems",
         "update_table":                         "dynamodb:UpdateTable",
-        # Resource API — boto3.resource('dynamodb').Table('name')
-        # Table() returns a Table resource object — needs read+write at minimum
+        # Resource API
         "table":                                "dynamodb:DescribeTable",
     },
     "lambda": {
@@ -72,6 +75,7 @@ IAM_ACTION_MAP: dict[str, dict[str, str]] = {
         "create_event_source_mapping":          "lambda:CreateEventSourceMapping",
         "delete_event_source_mapping":          "lambda:DeleteEventSourceMapping",
         "list_event_source_mappings":           "lambda:ListEventSourceMappings",
+        # get_waiter is an SDK utility method, not an IAM action — intentionally omitted
     },
     "iam": {
         "create_role":                          "iam:CreateRole",
@@ -245,6 +249,9 @@ IAM_ACTION_MAP: dict[str, dict[str, str]] = {
         "describe_state_machine":               "states:DescribeStateMachine",
         "update_state_machine":                 "states:UpdateStateMachine",
         "start_sync_execution":                 "states:StartSyncExecution",
+        "send_task_success":                    "states:SendTaskSuccess",
+        "send_task_failure":                    "states:SendTaskFailure",
+        "send_task_heartbeat":                  "states:SendTaskHeartbeat",
     },
     "cloudwatch": {
         "put_metric_data":                      "cloudwatch:PutMetricData",
@@ -269,6 +276,8 @@ IAM_ACTION_MAP: dict[str, dict[str, str]] = {
         "delete_log_stream":                    "logs:DeleteLogStream",
         "start_query":                          "logs:StartQuery",
         "get_query_results":                    "logs:GetQueryResults",
+        "create_export_task":                   "logs:CreateExportTask",
+        "describe_export_tasks":                "logs:DescribeExportTasks",
     },
     "ec2": {
         "describe_instances":                   "ec2:DescribeInstances",
@@ -294,6 +303,7 @@ IAM_ACTION_MAP: dict[str, dict[str, str]] = {
         "describe_db_clusters":                 "rds:DescribeDBClusters",
         "create_db_snapshot":                   "rds:CreateDBSnapshot",
         "delete_db_snapshot":                   "rds:DeleteDBSnapshot",
+        "describe_db_snapshots":                "rds:DescribeDBSnapshots",
         "restore_db_instance_from_db_snapshot": "rds:RestoreDBInstanceFromDBSnapshot",
         "modify_db_instance":                   "rds:ModifyDBInstance",
     },
@@ -302,6 +312,7 @@ IAM_ACTION_MAP: dict[str, dict[str, str]] = {
         "admin_delete_user":                    "cognito-idp:AdminDeleteUser",
         "admin_get_user":                       "cognito-idp:AdminGetUser",
         "list_users":                           "cognito-idp:ListUsers",
+        "list_user_pool_clients":               "cognito-idp:ListUserPoolClients",
         "initiate_auth":                        "cognito-idp:InitiateAuth",
         "respond_to_auth_challenge":            "cognito-idp:RespondToAuthChallenge",
         "sign_up":                              "cognito-idp:SignUp",
@@ -339,6 +350,37 @@ IAM_ACTION_MAP: dict[str, dict[str, str]] = {
         "delete_stream":                        "kinesis:DeleteStream",
         "merge_shards":                         "kinesis:MergeShards",
         "split_shard":                          "kinesis:SplitShard",
+    },
+    "textract": {
+        "detect_document_text":                 "textract:DetectDocumentText",
+        "analyze_document":                     "textract:AnalyzeDocument",
+        "start_document_text_detection":        "textract:StartDocumentTextDetection",
+        "get_document_text_detection":          "textract:GetDocumentTextDetection",
+        "start_document_analysis":              "textract:StartDocumentAnalysis",
+        "get_document_analysis":                "textract:GetDocumentAnalysis",
+    },
+    "support": {
+        "describe_trusted_advisor_checks":          "support:DescribeTrustedAdvisorChecks",
+        "describe_trusted_advisor_check_result":    "support:DescribeTrustedAdvisorCheckResult",
+        "refresh_trusted_advisor_check":            "support:RefreshTrustedAdvisorCheck",
+        "describe_cases":                           "support:DescribeCases",
+        "create_case":                              "support:CreateCase",
+        "add_communication_to_case":                "support:AddCommunicationToCase",
+        "resolve_case":                             "support:ResolveCase",
+    },
+    "cloudformation": {
+        "describe_stacks":                          "cloudformation:DescribeStacks",
+        "create_stack":                             "cloudformation:CreateStack",
+        "update_stack":                             "cloudformation:UpdateStack",
+        "delete_stack":                             "cloudformation:DeleteStack",
+        "describe_stack_events":                    "cloudformation:DescribeStackEvents",
+        "describe_stack_resources":                 "cloudformation:DescribeStackResources",
+        "list_stacks":                              "cloudformation:ListStacks",
+        "get_template":                             "cloudformation:GetTemplate",
+        "validate_template":                        "cloudformation:ValidateTemplate",
+        "create_change_set":                        "cloudformation:CreateChangeSet",
+        "execute_change_set":                       "cloudformation:ExecuteChangeSet",
+        "describe_change_set":                      "cloudformation:DescribeChangeSet",
     },
 }
 
