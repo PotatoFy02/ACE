@@ -11,6 +11,7 @@ from dotenv import load_dotenv
 from pydantic import BaseModel, Field
 from google import genai
 from google.genai import types
+from google.genai.errors import ServerError
 
 load_dotenv()
 if not os.getenv("GEMINI_API_KEY"):
@@ -20,6 +21,13 @@ client = genai.Client()
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.5-flash")
 DAILY_GENERATION_CAP = int(os.getenv("DAILY_GENERATION_CAP", "500"))
 GEMINI_TIMEOUT_MS = int(os.getenv("GEMINI_TIMEOUT_MS", "45000"))
+
+GEMINI_MODEL_FALLBACK_CHAIN = [
+    GEMINI_MODEL,
+    "gemini-3.6-flash",
+    "gemini-2.5-flash",
+    "gemini-3.1-flash-lite",
+]
 
 _lock = threading.Lock()
 _gen_count = 0
@@ -98,24 +106,47 @@ Rules:
 
 def generate_threat_model(architecture_description: str) -> ThreatModel:
     _check_cap()
-    try:
-        response = client.models.generate_content(
-            model=GEMINI_MODEL,
-            contents=f"System architecture to analyze:\n\n{architecture_description}",
-            config=types.GenerateContentConfig(
-                system_instruction=SYSTEM_PROMPT,
-                temperature=0.3,
-                response_mime_type="application/json",
-                response_schema=ThreatModel,
-                http_options=types.HttpOptions(timeout=GEMINI_TIMEOUT_MS),
-            ),
-        )
-    except GenerationCapExceeded:
-        raise
-    except Exception as e:
-        log.exception("Gemini call failed")
-        raise ValueError(f"LLM request failed: {type(e).__name__}: {str(e)[:200]}")
 
-    if response.parsed is None:
-        raise ValueError("Model returned no valid structured output.")
-    return response.parsed
+    last_error = None
+
+    for model_name in GEMINI_MODEL_FALLBACK_CHAIN:
+        for attempt in range(2):
+            try:
+                log.info(f"Trying model {model_name} (attempt {attempt + 1})")
+                response = client.models.generate_content(
+                    model=model_name,
+                    contents=f"System architecture to analyze:\n\n{architecture_description}",
+                    config=types.GenerateContentConfig(
+                        system_instruction=SYSTEM_PROMPT,
+                        temperature=0.3,
+                        response_mime_type="application/json",
+                        response_schema=ThreatModel,
+                        http_options=types.HttpOptions(timeout=GEMINI_TIMEOUT_MS),
+                    ),
+                )
+
+                if response.parsed is None:
+                    raise ValueError("Model returned no valid structured output.")
+
+                if model_name != GEMINI_MODEL:
+                    log.warning(f"Primary model unavailable, succeeded with fallback: {model_name}")
+
+                return response.parsed
+
+            except GenerationCapExceeded:
+                raise
+
+            except ServerError as e:
+                last_error = e
+                log.warning(f"Model {model_name} returned ServerError (attempt {attempt + 1}): {e}")
+                if attempt == 0:
+                    time.sleep(1)
+                else:
+                    break  # move to next model in chain
+
+            except Exception as e:
+                log.exception(f"Gemini call failed on model {model_name}")
+                raise ValueError(f"LLM request failed: {type(e).__name__}: {str(e)[:200]}")
+
+    log.error(f"All models in fallback chain exhausted. Last error: {last_error}")
+    raise ValueError("AI service temporarily unavailable across all models. Please try again in a few minutes.")

@@ -9,14 +9,11 @@ GITHUB_API = "https://api.github.com"
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN", "")
 ALLOWED_EXT = (".tf", ".hcl", ".yaml", ".yml", ".json")
 MAX_FILES = 25
-MAX_TOTAL_BYTES = 7000
+MAX_CHARS = 12000
 MAX_SINGLE_FILE = 60000
 TIMEOUT = 10
-MIN_QUOTA_REMAINING = 5  # abort before spending the last few requests app-wide
+MIN_QUOTA_REMAINING = 5
 
-# Scopes a read-only public-repo importer never needs. If GITHUB_TOKEN carries
-# any of these, it's over-scoped for what ACE actually does - re-issue as a
-# fine-grained PAT limited to public repo contents (read-only).
 RISKY_SCOPES = {"repo", "admin:org", "delete_repo", "admin:repo_hook", "workflow"}
 
 REPO_URL_RE = re.compile(
@@ -36,10 +33,6 @@ def _headers():
 
 
 def verify_pat_scope() -> None:
-    """Call once at startup. Logs the ACTUAL granted scope of GITHUB_TOKEN
-    instead of leaving it unverified. GitHub returns the token's scopes in
-    the X-OAuth-Scopes response header on any authenticated request - this
-    call does not consume core rate-limit quota."""
     if not GITHUB_TOKEN:
         log.warning(
             "GITHUB_TOKEN not set - running unauthenticated (60 req/hr, "
@@ -79,14 +72,10 @@ def _check_rate_limit(r):
 
 
 def _check_quota_before_fetch():
-    """App-wide guard: the whole app shares ONE GITHUB_TOKEN quota across all
-    users. Check remaining quota before spending it on a multi-request import,
-    rather than letting one user's request burn the last few calls and hand
-    every other concurrent user a cryptic mid-request 403."""
     try:
         r = requests.get(f"{GITHUB_API}/rate_limit", headers=_headers(), timeout=TIMEOUT)
     except requests.RequestException:
-        return  # fail open - a failed pre-check shouldn't block imports entirely
+        return
     if r.status_code != 200:
         return
     remaining = r.json().get("resources", {}).get("core", {}).get("remaining", 999)
@@ -148,8 +137,13 @@ def fetch_iac_from_repo(url: str, parse_fn) -> str:
             "No Infrastructure-as-Code files found (.tf, .yaml, .yml, .json, Dockerfile)."
         )
 
+    skipped = max(0, len([
+        node["path"] for node in tree
+        if node.get("type") == "blob" and _is_iac_file(node["path"])
+    ]) - MAX_FILES)
+
     summaries = []
-    total = 0
+    total_chars = 0
     for path in iac_paths:
         raw_url = f"https://raw.githubusercontent.com/{owner}/{repo}/{branch}/{path}"
         fr = requests.get(raw_url, timeout=TIMEOUT)
@@ -166,13 +160,22 @@ def fetch_iac_from_repo(url: str, parse_fn) -> str:
         filename = path.rsplit("/", 1)[-1]
         summary = parse_fn(filename, text)
         block = f"### {path}\n{summary}\n"
-        if total + len(block) > MAX_TOTAL_BYTES:
+        if total_chars + len(block) > MAX_CHARS:
+            log.warning(
+                "GitHub import: character limit (%d) reached after %d files. "
+                "Remaining files truncated.",
+                MAX_CHARS, len(summaries)
+            )
             break
         summaries.append(block)
-        total += len(block)
+        total_chars += len(block)
 
     if not summaries:
         raise GitHubImportError("Could not download any readable IaC files.")
+
+    if skipped > 0:
+        log.info("GitHub import: repo had %d IaC files, capped at %d. %d skipped.", 
+                 skipped + MAX_FILES, MAX_FILES, skipped)
 
     header = f"Repository '{owner}/{repo}' contains the following infrastructure:\n\n"
     return header + "\n".join(summaries)
