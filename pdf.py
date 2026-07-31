@@ -1,3 +1,6 @@
+# Copyright (c) 2026 Pot (PotatoFy02). All rights reserved.
+# ACE — Automated Cybersecurity Engine
+# Unauthorized commercial use prohibited. See LICENSE.
 from io import BytesIO
 from datetime import datetime
 from xml.sax.saxutils import escape
