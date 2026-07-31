@@ -9,7 +9,7 @@ class Confidence(str, Enum):
     LOW = "low"
 
 
-# RPM: Required Permissions Manifest 
+# RPM: Required Permissions Manifest
 
 class SDKCall(BaseModel):
     service: str                          # e.g. "s3"
@@ -27,7 +27,7 @@ class RPM(BaseModel):
     sdk_calls: list[SDKCall]
 
 
-#  GPM: Granted Permissions Manifest
+# GPM: Granted Permissions Manifest
 
 class Statement(BaseModel):
     effect: Literal["Allow", "Deny"]
@@ -49,6 +49,9 @@ class GPM(BaseModel):
     created_by: str | None = None
     last_modified_pr: str | None = None
     attached_policies: list[AttachedPolicy]
+    requires_human_review: bool = False   # True when policy uses jsonencode()
+                                          # or any other unparseable syntax.
+                                          # Patch generator aborts on True.
 
 
 class Severity(str, Enum):
@@ -56,14 +59,17 @@ class Severity(str, Enum):
     MEDIUM = "medium"
     LOW = "low"
 
+
 class OverPrivilegeType(str, Enum):
     ACTION = "action"
     RESOURCE = "resource"
+
 
 class MatchMethod(str, Enum):
     FUZZY_NAME = "fuzzy_name"
     MANIFEST = "manifest"
     AMBIGUOUS = "ambiguous"
+
 
 class DeltaEntry(BaseModel):
     action_iam: str
@@ -71,6 +77,7 @@ class DeltaEntry(BaseModel):
     severity: Severity
     confidence: Confidence
     reason: str
+
 
 class DeltaResult(BaseModel):
     role_arn: str
@@ -80,4 +87,4 @@ class DeltaResult(BaseModel):
     rpm_service_name: str
     excess: list[DeltaEntry]
     requires_human_review: bool
-    patch_risk: Literal["green", "yellow", "red"]   
+    patch_risk: Literal["green", "yellow", "red"]

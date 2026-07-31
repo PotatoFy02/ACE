@@ -139,3 +139,58 @@ def project_stats(user_jwt, pid) -> dict:
         "soc2_controls_covered": controls,
         "readiness_score": readiness,
     }
+
+
+def get_evidence_rows(user_jwt: str, pid: str) -> list[dict]:
+    """
+    Query ace_unified_view for all fully-remediated IAM findings
+    belonging to this project.
+
+    A row is included only when ALL of these are true:
+      - remediation_status = 'resolved'
+      - ace_patch_commit_sha is not null  (cryptographic proof exists)
+      - ace_patch_pr_url is not null      (PR is traceable)
+      - ace_mitigated_at is not null      (close timestamp exists)
+      - approver_github_login is not null (human approval is recorded)
+
+    Column names match ace_unified_view exactly:
+      - title          (not threat_title)
+      - category       (not threat_category)
+      - severity       (not threat_severity)
+      - approved_at    (not approval_created_at)
+
+    Returns an empty list if no rows qualify — callers handle that as a
+    404 or informational response, not an error.
+    """
+    c = client_for(user_jwt)
+
+    result = (
+        c.table("ace_unified_view")
+        .select(
+            "threat_id,"
+            "title,"
+            "category,"
+            "severity,"
+            "soc2_control,"
+            "remediation_status,"
+            "project_id,"
+            "project_name,"
+            "ace_role_arn,"
+            "sweeper_state,"
+            "ace_patch_pr_url,"
+            "ace_patch_commit_sha,"
+            "ace_mitigated_at,"
+            "approver_github_login,"
+            "approved_at"
+        )
+        .eq("project_id", pid)
+        .eq("remediation_status", "resolved")
+        .not_.is_("ace_patch_commit_sha", "null")
+        .not_.is_("ace_patch_pr_url", "null")
+        .not_.is_("ace_mitigated_at", "null")
+        .not_.is_("approver_github_login", "null")
+        .order("ace_mitigated_at", desc=False)
+        .execute()
+    )
+
+    return result.data or []

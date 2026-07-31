@@ -12,24 +12,22 @@ from slowapi import Limiter
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 
-# Core Ingestion & Engine Imports
 from github_import import fetch_iac_from_repo, GitHubImportError, verify_pat_scope
 from generate import generate_threat_model, GenerationCapExceeded
 from auth import verify_token, get_bearer, try_decode, is_owner, require_role, ROLE_RANK, _admin
 from validators import validate_description, validate_name
 from iac_parser import parse_iac
-from db import (save_threat_model, list_projects, get_project, delete_project,
-                count_projects, update_threat_status, update_remediation, project_stats)
-from pdf import build_pdf
+from db import (
+    save_threat_model, list_projects, get_project, delete_project,
+    count_projects, update_threat_status, update_remediation, project_stats,
+    get_evidence_rows,       # NEW: queries ace_unified_view for resolved rows
+)
+from pdf import build_pdf, build_evidence_pdf   # NEW: build_evidence_pdf added
 from webhook import router as webhook_router
 
-# Logging Setup
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("app")
 
-# ── Sentry ────────────────────────────────────────────────────────────────────
-# Must initialise before FastAPI() is created so all routes are instrumented.
-# Guarded by env var — local runs without SENTRY_DSN are completely unaffected.
 _sentry_dsn = os.getenv("SENTRY_DSN")
 if _sentry_dsn:
     sentry_sdk.init(
@@ -38,22 +36,14 @@ if _sentry_dsn:
             StarletteIntegration(transaction_style="endpoint"),
             FastApiIntegration(transaction_style="endpoint"),
         ],
-        # 10% of requests sampled for performance tracing.
-        # All errors/exceptions are captured regardless of this rate.
         traces_sample_rate=0.1,
-        # Never send JWTs, IPs, or user tokens to Sentry.
-        # Critical for a security tool — PII must not leave the stack.
         send_default_pii=False,
-        # Tag every Sentry event with the deployed branch.
-        # Lets you filter "is this error from main or a feature branch?"
         environment=os.getenv("RENDER_GIT_BRANCH", "local"),
     )
     log.info("Sentry initialised (environment=%s)", os.getenv("RENDER_GIT_BRANCH", "local"))
 else:
     log.warning("SENTRY_DSN not set — error tracking disabled")
-# ─────────────────────────────────────────────────────────────────────────────
 
-# Environment Configurations
 FREE_PROJECT_LIMIT = int(os.getenv("FREE_PROJECT_LIMIT", "3"))
 ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "http://localhost:8000").split(",")
 MAX_BODY = 25000
@@ -61,7 +51,6 @@ MAX_UPLOAD = 120000
 ALLOWED_EXT = (".tf", ".hcl", ".yaml", ".yml", ".json", ".txt")
 
 
-# JWT/User Aware Rate Limiter Key Generation
 def rate_key(request: Request) -> str:
     auth = request.headers.get("authorization", "")
     if auth.startswith("Bearer "):
@@ -86,8 +75,6 @@ app.include_router(webhook_router)
 verify_pat_scope()
 
 
-# ── Global Exception Handlers ─────────────────────────────────────────────────
-
 @app.exception_handler(RateLimitExceeded)
 async def ratelimit_handler(request, exc):
     return JSONResponse(
@@ -96,8 +83,6 @@ async def ratelimit_handler(request, exc):
     )
 
 
-# ── CORS Middleware ───────────────────────────────────────────────────────────
-
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
@@ -105,8 +90,6 @@ app.add_middleware(
     allow_headers=["Authorization", "Content-Type"],
 )
 
-
-# ── HTTP Security Hardening Middleware ────────────────────────────────────────
 
 @app.middleware("http")
 async def hardening(request: Request, call_next):
@@ -133,8 +116,6 @@ async def hardening(request: Request, call_next):
     return resp
 
 
-# ── Pydantic Models ───────────────────────────────────────────────────────────
-
 class GenerateRequest(BaseModel):
     name: str = Field("Untitled", max_length=200)
     architecture_description: str = Field(..., max_length=8000)
@@ -157,25 +138,13 @@ class RoleUpdateRequest(BaseModel):
     role: str
 
 
-# ── Routes ────────────────────────────────────────────────────────────────────
-
 @app.get("/api/health")
 def health():
-    """
-    Basic liveness check.
-    Render and uptime monitors hit this to confirm the process is alive.
-    Does not check DB or external services — that is /api/health/deep.
-    """
     return {"status": "ok", "version": "2.5.0"}
 
 
 @app.get("/api/health/deep")
 async def health_deep():
-    """
-    Deep health check — verifies Supabase connectivity.
-    Hit this during a demo or before a pilot to confirm the full stack is up.
-    Returns 503 if any dependency is down so load balancers can route around it.
-    """
     import httpx
     checks = {"api": "ok", "supabase": "unknown"}
     status_code = 200
@@ -342,6 +311,10 @@ def stats(request: Request, pid: str, user=Depends(verify_token), jwt=Depends(ge
 @app.get("/api/projects/{pid}/pdf")
 @limiter.limit("30/minute")
 def export_pdf(request: Request, pid: str, user=Depends(verify_token), jwt=Depends(get_bearer)):
+    """
+    V1 threat model PDF — unchanged.
+    Returns the STRIDE threat model report for a project.
+    """
     data = get_project(jwt, pid)
     if not data["project"]:
         raise HTTPException(404, "Not found.")
@@ -358,6 +331,70 @@ def export_pdf(request: Request, pid: str, user=Depends(verify_token), jwt=Depen
         pdf,
         media_type="application/pdf",
         headers={"Content-Disposition": 'attachment; filename="audit-threat-model.pdf"'}
+    )
+
+
+@app.get("/api/projects/{pid}/evidence-pdf")
+@limiter.limit("30/minute")
+def export_evidence_pdf(
+    request: Request,
+    pid: str,
+    user=Depends(verify_token),
+    jwt=Depends(get_bearer)
+):
+    """
+    V2 SOC2 CC6.3 auditor evidence PDF.
+
+    Returns a PDF containing one evidence block per IAM role that has been:
+      - Identified as over-privileged by ACE
+      - Remediated via a Terraform PR
+      - Approved by an authorized human (commit SHA recorded)
+      - Auto-resolved in the threats table
+
+    This is the document a customer hands to their SOC2 auditor to close CC6.3.
+
+    Returns 404 if the project does not exist.
+    Returns 404 with a specific message if no remediated findings exist yet —
+    this tells the customer what they need to do (run ace analyze, get approvals)
+    rather than giving them a blank PDF.
+    """
+    # Verify project exists and belongs to this user
+    data = get_project(jwt, pid)
+    if not data["project"]:
+        raise HTTPException(404, "Project not found.")
+
+    project_name = data["project"].get("name", "Unknown Project")
+
+    # Query ace_unified_view for resolved, fully-evidenced rows
+    try:
+        rows = get_evidence_rows(jwt, pid)
+    except Exception:
+        log.exception("evidence rows query failed for project %s", pid)
+        raise HTTPException(500, "Could not retrieve remediation evidence.")
+
+    # No qualifying rows — return a helpful 404 rather than a blank PDF
+    if not rows:
+        raise HTTPException(
+            404,
+            "No completed IAM remediations found for this project. "
+            "Run 'ace analyze' in your CI pipeline, have a red-risk patch approved, "
+            "and ensure the threat is linked to the project via POST /api/ace/link-threat."
+        )
+
+    # Build and return the evidence PDF
+    try:
+        pdf = build_evidence_pdf(project_name, rows)
+    except Exception:
+        log.exception("evidence pdf build failed for project %s", pid)
+        raise HTTPException(500, "Could not generate evidence PDF.")
+
+    safe_name = project_name.lower().replace(" ", "-")[:40]
+    filename = f"ace-evidence-cc63-{safe_name}.pdf"
+
+    return Response(
+        pdf,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'}
     )
 
 
@@ -410,5 +447,4 @@ def set_user_role(request: Request, target_user_id: str, body: RoleUpdateRequest
     return {"status": "updated", "target_user_id": target_user_id, "role": body.role}
 
 
-# Fallback Routing for Client Static Assets (Must be mounted last)
 app.mount("/", StaticFiles(directory="static", html=True), name="static")
