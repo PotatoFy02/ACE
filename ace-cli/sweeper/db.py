@@ -5,7 +5,7 @@ Uses service role key — RLS blocks anon key on sweeper_roles table.
 
 import os
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from supabase import create_client
 
 log = logging.getLogger("sweeper.db")
@@ -24,7 +24,7 @@ def upsert_role(
     role_name: str,
     repo: str,
     tf_file_path: str,
-    created_by_email: str | None,
+    owner_slack_id: str | None,
     ignore_dormancy: bool = False,
     ignore_reason: str | None = None,
 ) -> dict:
@@ -48,7 +48,7 @@ def upsert_role(
             "role_name": role_name,
             "repo": repo,
             "tf_file_path": tf_file_path,
-            "created_by_email": created_by_email,
+            "owner_slack_id": owner_slack_id,
             "ignore_dormancy": ignore_dormancy,
             "ignore_reason": ignore_reason,
             "last_checked_at": now,
@@ -61,7 +61,7 @@ def upsert_role(
         "role_name": role_name,
         "repo": repo,
         "tf_file_path": tf_file_path,
-        "created_by_email": created_by_email,
+        "owner_slack_id": owner_slack_id,
         "state": "ACTIVE",
         "ignore_dormancy": ignore_dormancy,
         "ignore_reason": ignore_reason,
@@ -122,7 +122,6 @@ def get_pending_roles_past_cooling_off() -> list[dict]:
     Returns all roles in PENDING_REDUCTION where 14 days have elapsed.
     Called by the sweep command to advance stale pending roles to REDUCTION_READY.
     """
-    from datetime import timedelta
     cutoff = (datetime.now(timezone.utc) - timedelta(days=COOLING_OFF_DAYS)).isoformat()
 
     result = (
@@ -145,3 +144,48 @@ def get_roles_by_state(state: str) -> list[dict]:
         .execute()
     )
     return result.data or []
+
+
+def get_sweeper_status() -> list[dict]:
+    """
+    Returns countdown and state for every tracked role.
+    Used by GET /api/ace/sweeper-status.
+
+    For PENDING_REDUCTION roles, calculates days remaining in the cooling-off
+    period so customers can see exactly when a PR will be opened.
+    """
+    result = (
+        _client()
+        .table("sweeper_roles")
+        .select("role_arn, role_name, repo, state, dormancy_detected_at, pr_url, pr_number, ignore_dormancy, last_checked_at")
+        .execute()
+    )
+    roles = result.data or []
+
+    now = datetime.now(timezone.utc)
+    output = []
+
+    for role in roles:
+        entry = {
+            "role_arn": role["role_arn"],
+            "role_name": role["role_name"],
+            "repo": role["repo"],
+            "state": role["state"],
+            "ignore_dormancy": role.get("ignore_dormancy", False),
+            "last_checked_at": role.get("last_checked_at"),
+            "pr_url": role.get("pr_url"),
+            "pr_number": role.get("pr_number"),
+            "days_until_pr": None,
+            "cooling_off_started_at": None,
+        }
+
+        if role["state"] == "PENDING_REDUCTION" and role.get("dormancy_detected_at"):
+            detected_at = datetime.fromisoformat(role["dormancy_detected_at"].replace("Z", "+00:00"))
+            elapsed = (now - detected_at).days
+            days_remaining = max(0, COOLING_OFF_DAYS - elapsed)
+            entry["days_until_pr"] = days_remaining
+            entry["cooling_off_started_at"] = role["dormancy_detected_at"]
+
+        output.append(entry)
+
+    return output

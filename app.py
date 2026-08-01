@@ -23,10 +23,11 @@ from iac_parser import parse_iac
 from db import (
     save_threat_model, list_projects, get_project, delete_project,
     count_projects, update_threat_status, update_remediation, project_stats,
-    get_evidence_rows,       # NEW: queries ace_unified_view for resolved rows
+    get_evidence_rows,
 )
-from pdf import build_pdf, build_evidence_pdf   # NEW: build_evidence_pdf added
+from pdf import build_pdf, build_evidence_pdf
 from webhook import router as webhook_router
+from sweeper.db import get_sweeper_status
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("app")
@@ -249,8 +250,8 @@ async def generate_from_file(request: Request, file: UploadFile = File(...),
         raise
     except GenerationCapExceeded:
         raise HTTPException(429, "Service is at capacity today. Please try again later.")
-    except ValueError:
-        raise HTTPException(502, "AI could not analyze this file. Try a manual description.")
+    except ValueError as e:
+        raise HTTPException(502, str(e) if str(e) else "AI could not analyze this file. Try a manual description.")
     except Exception:
         log.exception("file generate failed")
         raise HTTPException(500, "Internal error.")
@@ -275,8 +276,8 @@ def generate_from_github(request: Request, req: GithubImportRequest,
         raise
     except GenerationCapExceeded:
         raise HTTPException(429, "Service is at capacity today. Please try again later.")
-    except ValueError:
-        raise HTTPException(502, "AI could not analyze this repository. Try a manual description.")
+    except ValueError as e:
+        raise HTTPException(502, str(e) if str(e) else "AI could not analyze this repository. Try a manual description.")
     except Exception:
         log.exception("github generate failed")
         raise HTTPException(500, "Internal error.")
@@ -347,35 +348,19 @@ def export_evidence_pdf(
 ):
     """
     V2 SOC2 CC6.3 auditor evidence PDF.
-
-    Returns a PDF containing one evidence block per IAM role that has been:
-      - Identified as over-privileged by ACE
-      - Remediated via a Terraform PR
-      - Approved by an authorized human (commit SHA recorded)
-      - Auto-resolved in the threats table
-
-    This is the document a customer hands to their SOC2 auditor to close CC6.3.
-
-    Returns 404 if the project does not exist.
-    Returns 404 with a specific message if no remediated findings exist yet —
-    this tells the customer what they need to do (run ace analyze, get approvals)
-    rather than giving them a blank PDF.
     """
-    # Verify project exists and belongs to this user
     data = get_project(jwt, pid)
     if not data["project"]:
         raise HTTPException(404, "Project not found.")
 
     project_name = data["project"].get("name", "Unknown Project")
 
-    # Query ace_unified_view for resolved, fully-evidenced rows
     try:
         rows = get_evidence_rows(jwt, pid)
     except Exception:
         log.exception("evidence rows query failed for project %s", pid)
         raise HTTPException(500, "Could not retrieve remediation evidence.")
 
-    # No qualifying rows — return a helpful 404 rather than a blank PDF
     if not rows:
         raise HTTPException(
             404,
@@ -384,7 +369,6 @@ def export_evidence_pdf(
             "and ensure the threat is linked to the project via POST /api/ace/link-threat."
         )
 
-    # Build and return the evidence PDF
     try:
         pdf = build_evidence_pdf(project_name, rows)
     except Exception:
@@ -399,6 +383,21 @@ def export_evidence_pdf(
         media_type="application/pdf",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'}
     )
+
+
+@app.get("/api/ace/sweeper-status")
+@limiter.limit("60/minute")
+def sweeper_status(request: Request, user=Depends(verify_token)):
+    """
+    Returns the current state and cooling-off countdown for every tracked IAM role.
+    PENDING_REDUCTION roles include days_until_pr so customers can see exactly
+    when ACE will open a PR — no more surprise PRs on day 14.
+    """
+    try:
+        return {"roles": get_sweeper_status()}
+    except Exception:
+        log.exception("sweeper status failed")
+        raise HTTPException(500, "Internal error.")
 
 
 @app.patch("/api/threats/{tid}/status")
