@@ -5,6 +5,7 @@ Uses service role key — RLS blocks anon key on sweeper_roles table.
 
 import os
 import logging
+from typing import Any, cast
 from datetime import datetime, timezone, timedelta
 from supabase import create_client
 
@@ -27,11 +28,7 @@ def upsert_role(
     owner_slack_id: str | None,
     ignore_dormancy: bool = False,
     ignore_reason: str | None = None,
-) -> dict:
-    """
-    Inserts role if not seen before, updates metadata if already exists.
-    Never downgrades state — only the state machine transitions do that.
-    """
+) -> dict[str, Any]:
     existing = (
         _client()
         .table("sweeper_roles")
@@ -43,7 +40,7 @@ def upsert_role(
 
     now = datetime.now(timezone.utc).isoformat()
 
-    if existing.data:
+    if existing and existing.data:
         _client().table("sweeper_roles").update({
             "role_name": role_name,
             "repo": repo,
@@ -54,7 +51,7 @@ def upsert_role(
             "last_checked_at": now,
             "updated_at": now,
         }).eq("role_arn", role_arn).execute()
-        return existing.data
+        return cast(dict[str, Any], existing.data)  # type: ignore[union-attr]
 
     result = _client().table("sweeper_roles").insert({
         "role_arn": role_arn,
@@ -67,10 +64,10 @@ def upsert_role(
         "ignore_reason": ignore_reason,
         "last_checked_at": now,
     }).execute()
-    return result.data[0]
+    return cast(dict[str, Any], result.data[0])  # type: ignore[union-attr]
 
 
-def get_role(role_arn: str) -> dict | None:
+def get_role(role_arn: str) -> dict[str, Any] | None:
     result = (
         _client()
         .table("sweeper_roles")
@@ -79,7 +76,7 @@ def get_role(role_arn: str) -> dict | None:
         .maybe_single()
         .execute()
     )
-    return result.data
+    return cast(dict[str, Any] | None, result.data)  # type: ignore[union-attr]
 
 
 def transition(
@@ -87,12 +84,8 @@ def transition(
     to_state: str,
     reason: str,
     actor: str = "ace-sweeper",
-    extra_fields: dict | None = None,
+    extra_fields: dict[str, Any] | None = None,
 ) -> None:
-    """
-    Moves a role to a new state and writes the transition to sweeper_events.
-    This is the only place state changes happen — never update state directly.
-    """
     role = get_role(role_arn)
     if not role:
         raise ValueError(f"Role not found: {role_arn}")
@@ -100,7 +93,7 @@ def transition(
     from_state = role["state"]
     now = datetime.now(timezone.utc).isoformat()
 
-    update = {"state": to_state, "updated_at": now}
+    update: dict[str, Any] = {"state": to_state, "updated_at": now}
     if extra_fields:
         update.update(extra_fields)
 
@@ -117,11 +110,7 @@ def transition(
     log.info(f"Transition: {role_arn} {from_state} → {to_state} ({reason})")
 
 
-def get_pending_roles_past_cooling_off() -> list[dict]:
-    """
-    Returns all roles in PENDING_REDUCTION where 14 days have elapsed.
-    Called by the sweep command to advance stale pending roles to REDUCTION_READY.
-    """
+def get_pending_roles_past_cooling_off() -> list[dict[str, Any]]:
     cutoff = (datetime.now(timezone.utc) - timedelta(days=COOLING_OFF_DAYS)).isoformat()
 
     result = (
@@ -132,10 +121,10 @@ def get_pending_roles_past_cooling_off() -> list[dict]:
         .lt("dormancy_detected_at", cutoff)
         .execute()
     )
-    return result.data or []
+    return cast(list[dict[str, Any]], result.data or [])
 
 
-def get_roles_by_state(state: str) -> list[dict]:
+def get_roles_by_state(state: str) -> list[dict[str, Any]]:
     result = (
         _client()
         .table("sweeper_roles")
@@ -143,10 +132,10 @@ def get_roles_by_state(state: str) -> list[dict]:
         .eq("state", state)
         .execute()
     )
-    return result.data or []
+    return cast(list[dict[str, Any]], result.data or [])
 
 
-def get_sweeper_status() -> list[dict]:
+def get_sweeper_status() -> list[dict[str, Any]]:
     """
     Returns countdown and state for every tracked role.
     Used by GET /api/ace/sweeper-status.
@@ -160,13 +149,13 @@ def get_sweeper_status() -> list[dict]:
         .select("role_arn, role_name, repo, state, dormancy_detected_at, pr_url, pr_number, ignore_dormancy, last_checked_at")
         .execute()
     )
-    roles = result.data or []
+    roles = cast(list[dict[str, Any]], result.data or [])
 
     now = datetime.now(timezone.utc)
-    output = []
+    output: list[dict[str, Any]] = []
 
     for role in roles:
-        entry = {
+        entry: dict[str, Any] = {
             "role_arn": role["role_arn"],
             "role_name": role["role_name"],
             "repo": role["repo"],
@@ -180,7 +169,8 @@ def get_sweeper_status() -> list[dict]:
         }
 
         if role["state"] == "PENDING_REDUCTION" and role.get("dormancy_detected_at"):
-            detected_at = datetime.fromisoformat(role["dormancy_detected_at"].replace("Z", "+00:00"))
+            detected_str = str(role["dormancy_detected_at"]).replace("Z", "+00:00")
+            detected_at = datetime.fromisoformat(detected_str)
             elapsed = (now - detected_at).days
             days_remaining = max(0, COOLING_OFF_DAYS - elapsed)
             entry["days_until_pr"] = days_remaining
