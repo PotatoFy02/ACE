@@ -1556,16 +1556,338 @@ async function loadOverview() {
 
     document.getElementById('readiness-pct').textContent = `${pcts}%`;
     document.getElementById('readiness-fill').style.width = `${pcts}%`;
-    document.getElementById('readiness-sub').textContent = `${active} of ${total} roles enforcing least privilege.`;
+    document.getElementById('readiness-sub').textContent =
+      pcts === 100 ? 'All tracked roles are active — no dormancy detected.' :
+      `${total - active} role${total - active !== 1 ? 's' : ''} need attention before your audit.`;
+
+    // Update nav badge
+    const navCount = document.getElementById('nav-role-count');
+    if (pending > 0) {
+      navCount.textContent = pending;
+      navCount.style.display = '';
+    } else {
+      navCount.style.display = 'none';
+    }
+
+    // Activity feed
+    const feedItems = [
+      ...(pending > 0 ? [{ color: 'yellow', text: `${pending} role${pending!==1?'s':''} in cooling-off period`, time: 'Now' }] : []),
+      ...(open > 0    ? [{ color: 'blue',   text: `${open} permission reduction PR${open!==1?'s':''} open`,     time: 'Active' }] : []),
+      ...(plist.length > 0 ? [{ color: 'green', text: `${plist.length} project${plist.length!==1?'s':''} analyzed`, time: 'Up to date' }] : []),
+      { color: 'blue', text: 'ACE sweeper running', time: 'Continuous' },
+    ];
+
+    document.getElementById('activity-feed').innerHTML = feedItems.slice(0,4).map(f => `
+      <div class="feed-item">
+        <div class="feed-dot ${f.color}"></div>
+        <div>
+          <div class="feed-text">${f.text}</div>
+          <div class="feed-time">${f.time}</div>
+        </div>
+      </div>
+    `).join('') || '<p style="font-size:13px;color:var(--text-muted)">No recent activity.</p>';
+
   } catch (e) {
-    console.error(e);
+    toast('Could not load overview: ' + e.message, 'err');
   }
 }
 
-/* ─── INIT ───────────────────────────────────────────── */
-loadOverview();
+/* ─── LOAD ROLES ─────────────────────────────────────── */
+async function loadRoles() {
+  const jwt = getJwt();
+  const el = document.getElementById('roles-list');
 
-// Wire sign-in click on initial load (before any session exists)
+  if (!jwt) {
+    el.innerHTML = `<div class="empty"><div class="empty-icon">🔐</div><h3>Sign in to view roles</h3></div>`;
+    return;
+  }
+
+  el.innerHTML = `
+    <div class="skeleton" style="height:72px;border-radius:14px;margin-bottom:10px"></div>
+    <div class="skeleton" style="height:72px;border-radius:14px;margin-bottom:10px"></div>
+    <div class="skeleton" style="height:72px;border-radius:14px"></div>
+  `;
+
+  try {
+    const r = await fetch('/api/ace/sweeper-status', { headers: { Authorization: `Bearer ${jwt}` } });
+    const data = await r.json();
+    const roles = data.roles || [];
+
+    if (!roles.length) {
+      el.innerHTML = `<div class="empty"><div class="empty-icon">✅</div><h3>No roles tracked yet</h3><p>Run <code>ace analyze</code> in your CI pipeline to start monitoring IAM roles.</p></div>`;
+      return;
+    }
+
+    const stateClass = s => ({
+      'ACTIVE': 'active', 'PENDING_REDUCTION': 'pending',
+      'REDUCTION_READY': 'ready', 'PR_OPEN': 'pr'
+    }[s] || 'active');
+
+    const stateLabel = s => ({
+      'ACTIVE': 'Active', 'PENDING_REDUCTION': 'Pending',
+      'REDUCTION_READY': 'Reduction Ready', 'PR_OPEN': 'PR Open'
+    }[s] || s);
+
+    el.innerHTML = roles.map((role, i) => `
+      <div class="role-card state-${stateClass(role.state)}" style="animation-delay:${i*40}ms">
+        <div>
+          <div class="role-name">${esc(role.role_name || role.role_arn)}</div>
+          <div class="role-repo">${esc(role.repo || '—')}</div>
+        </div>
+        <div class="role-right">
+          <div><span class="state-pill ${stateClass(role.state)}">${stateLabel(role.state)}</span></div>
+          ${role.state === 'PENDING_REDUCTION' && role.days_until_pr !== null ?
+            `<div class="countdown">PR opens in <b>${role.days_until_pr}d</b></div>` :
+            role.state === 'PR_OPEN' && role.pr_url ?
+            `<a href="${esc(role.pr_url)}" target="_blank" class="btn sm" style="margin-top:4px">View PR →</a>` : ''}
+        </div>
+      </div>
+    `).join('');
+
+    el.querySelectorAll('.role-card').forEach((c, i) => {
+      c.style.opacity = '0';
+      c.style.transform = 'translateX(-8px)';
+      setTimeout(() => {
+        c.style.transition = 'opacity 0.3s ease, transform 0.3s cubic-bezier(0.25,1,0.5,1)';
+        c.style.opacity = '';
+        c.style.transform = '';
+      }, i * 45);
+    });
+
+  } catch (e) {
+    el.innerHTML = `<div class="empty"><div class="empty-icon">⚠️</div><h3>Could not load roles</h3><p>${e.message}</p></div>`;
+  }
+}
+
+/* ─── LOAD THREATS ───────────────────────────────────── */
+async function loadThreats() {
+  const jwt = getJwt();
+  const el = document.getElementById('threats-list');
+  if (!jwt) {
+    el.innerHTML = `<div class="empty"><div class="empty-icon">🔐</div><h3>Sign in to view threats</h3></div>`;
+    return;
+  }
+
+  el.innerHTML = `<div class="skeleton" style="height:120px;border-radius:14px;margin-bottom:10px"></div><div class="skeleton" style="height:120px;border-radius:14px"></div>`;
+
+  try {
+    const r = await fetch('/api/projects', { headers: { Authorization: `Bearer ${jwt}` } });
+    const data = await r.json();
+    const projects = data.projects || [];
+
+    // Populate project filter
+    const sel = document.getElementById('threat-project-filter');
+    const existing = Array.from(sel.options).map(o => o.value);
+    projects.forEach(p => {
+      if (!existing.includes(p.id)) {
+        const o = document.createElement('option');
+        o.value = p.id;
+        o.textContent = p.name;
+        sel.appendChild(o);
+      }
+    });
+
+    const filterPid = sel.value;
+    const filtered = filterPid ? projects.filter(p => p.id === filterPid) : projects;
+
+    if (!filtered.length) {
+      el.innerHTML = `<div class="empty"><div class="empty-icon">🛡️</div><h3>No projects yet</h3><p>Run a new analysis to start finding threats.</p><button class="primary" onclick="navigate('generate')">New Analysis</button></div>`;
+      return;
+    }
+
+    // Gather all threats across projects
+    const allThreats = [];
+    await Promise.all(filtered.map(async p => {
+      const r2 = await fetch(`/api/projects/${p.id}`, { headers: { Authorization: `Bearer ${jwt}` } });
+      const d2 = await r2.json();
+      (d2.threats || []).forEach(t => allThreats.push({ ...t, _project: p.name, _pid: p.id }));
+    }));
+
+    if (!allThreats.length) {
+      el.innerHTML = `<div class="empty"><div class="empty-icon">✅</div><h3>No threats found</h3><p>Run a new analysis to identify STRIDE threats in your infrastructure.</p></div>`;
+      return;
+    }
+
+    const sev = s => ({'Critical':'critical','High':'high','Medium':'medium','Low':'low'}[s]||'low');
+
+    el.innerHTML = allThreats.map((t, i) => `
+      <div class="threat-card ${sev(t.severity)}" style="animation-delay:${i*45}ms">
+        <div class="threat-top">
+          <div>
+            <div style="font-size:10px;color:var(--text-muted);margin-bottom:4px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase">${esc(t._project)}</div>
+            <div class="threat-title">${esc(t.title)}</div>
+          </div>
+          <div style="display:flex;flex-direction:column;align-items:flex-end;gap:5px">
+            <span class="badge ${sev(t.severity)}">${esc(t.severity)}</span>
+            <span class="badge ${t.status||'pending'}">${esc(t.status||'pending')}</span>
+          </div>
+        </div>
+        <div class="threat-meta">
+          <span>${esc(t.category)}</span><span>•</span><span>${esc(t.affected_component)}</span>
+        </div>
+        <div class="threat-soc2">${esc(t.soc2_control)}</div>
+        <div class="threat-desc">${esc(t.description)}</div>
+        <div class="threat-actions">
+          <select class="sm" onchange="setThreatStatus('${t.id}',this.value)" style="width:auto;margin:0">
+            <option value="pending"   ${t.status==='pending'?'selected':''}>Pending</option>
+            <option value="accepted"  ${t.status==='accepted'?'selected':''}>Accepted</option>
+            <option value="rejected"  ${t.status==='rejected'?'selected':''}>Rejected</option>
+          </select>
+          <select class="sm" onchange="setThreatRemediation('${t.id}',this.value)" style="width:auto;margin:0">
+            <option value="not_started"  ${t.remediation_status==='not_started'?'selected':''}>Not started</option>
+            <option value="in_progress"  ${t.remediation_status==='in_progress'?'selected':''}>In progress</option>
+            <option value="resolved"     ${t.remediation_status==='resolved'?'selected':''}>Resolved</option>
+          </select>
+        </div>
+      </div>
+    `).join('');
+
+    el.querySelectorAll('.threat-card').forEach((c, i) => {
+      c.style.opacity = '0';
+      c.style.transform = 'translateY(10px)';
+      setTimeout(() => {
+        c.style.transition = 'opacity 0.35s ease, transform 0.35s cubic-bezier(0.25,1,0.5,1)';
+        c.style.opacity = '';
+        c.style.transform = '';
+      }, i * 50);
+    });
+
+  } catch (e) {
+    el.innerHTML = `<div class="empty"><div class="empty-icon">⚠️</div><h3>Could not load threats</h3><p>${e.message}</p></div>`;
+  }
+}
+
+/* ─── LOAD EVIDENCE ──────────────────────────────────── */
+async function loadEvidence() {
+  const jwt = getJwt();
+  const el = document.getElementById('evidence-list');
+  if (!jwt) {
+    el.innerHTML = `<div class="empty"><div class="empty-icon">🔐</div><h3>Sign in to view evidence</h3></div>`;
+    return;
+  }
+
+  el.innerHTML = `<div class="skeleton" style="height:80px;border-radius:14px;margin-bottom:10px"></div><div class="skeleton" style="height:80px;border-radius:14px"></div>`;
+
+  try {
+    const r = await fetch('/api/projects', { headers: { Authorization: `Bearer ${jwt}` } });
+    const data = await r.json();
+    const projects = data.projects || [];
+
+    if (!projects.length) {
+      el.innerHTML = `<div class="empty"><div class="empty-icon">📋</div><h3>No projects yet</h3><p>Run an analysis and complete IAM remediation to generate evidence PDFs.</p><button class="primary" onclick="navigate('generate')">New Analysis</button></div>`;
+      return;
+    }
+
+    el.innerHTML = projects.map((p, i) => `
+      <div class="evidence-card" style="animation-delay:${i*50}ms">
+        <div>
+          <div class="evidence-name">${esc(p.name)}</div>
+          <div class="evidence-meta">
+            <span>CC6.3 Evidence Package</span>
+            <span>•</span>
+            <span>${esc(p.created_at ? new Date(p.created_at).toLocaleDateString() : 'Unknown date')}</span>
+          </div>
+        </div>
+        <div class="row">
+          <button class="sm" onclick="downloadEvidence('${p.id}','${esc(p.name)}')">
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+              <path d="M6 1v7M3 5.5l3 3 3-3M1.5 10h9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            Download PDF
+          </button>
+        </div>
+      </div>
+    `).join('');
+
+    el.querySelectorAll('.evidence-card').forEach((c, i) => {
+      c.style.opacity = '0';
+      c.style.transform = 'translateY(8px)';
+      setTimeout(() => {
+        c.style.transition = 'opacity 0.3s ease, transform 0.3s cubic-bezier(0.25,1,0.5,1)';
+        c.style.opacity = '';
+        c.style.transform = '';
+      }, i * 50);
+    });
+
+  } catch (e) {
+    el.innerHTML = `<div class="empty"><div class="empty-icon">⚠️</div><h3>Could not load projects</h3><p>${e.message}</p></div>`;
+  }
+}
+
+async function downloadEvidence(pid, name) {
+  const jwt = getJwt();
+  if (!jwt) { toast('Sign in first', 'err'); return; }
+  toast('Generating PDF…', 'info');
+  try {
+    const r = await fetch(`/api/projects/${pid}/evidence-pdf`, { headers: { Authorization: `Bearer ${jwt}` } });
+    if (!r.ok) {
+      const d = await r.json();
+      throw new Error(d.detail || 'PDF generation failed');
+    }
+    const blob = await r.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `ace-evidence-${name.toLowerCase().replace(/\s+/g,'-')}.pdf`;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast('PDF downloaded', 'ok');
+  } catch (e) {
+    toast(e.message, 'err');
+  }
+}
+
+/* ─── STATUS UPDATES ─────────────────────────────────── */
+async function setThreatStatus(tid, status) {
+  const jwt = getJwt();
+  if (!jwt) return;
+  try {
+    const r = await fetch(`/api/threats/${tid}/status`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${jwt}` },
+      body: JSON.stringify({ status }),
+    });
+    if (!r.ok) throw new Error('Update failed');
+    toast(`Status set to ${status}`, 'ok');
+  } catch (e) { toast(e.message, 'err'); }
+}
+
+async function setThreatRemediation(tid, status) {
+  const jwt = getJwt();
+  if (!jwt) return;
+  try {
+    const r = await fetch(`/api/threats/${tid}/remediation`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${jwt}` },
+      body: JSON.stringify({ status }),
+    });
+    if (!r.ok) throw new Error('Update failed');
+    toast(`Remediation: ${status.replace(/_/g,' ')}`, 'ok');
+  } catch (e) { toast(e.message, 'err'); }
+}
+
+/* ─── AUTH ───────────────────────────────────────────── */
+function getJwt() {
+  const s = window._supaSession;
+  return s ? s.access_token : null;
+}
+
+// Auth is handled by app.js — expose callback for when session changes
+window._onSessionChange = function(session) {
+  if (session) {
+    const email = session.user?.email || '';
+    document.getElementById('user-email').textContent = email;
+    document.getElementById('user-initial').textContent = email[0]?.toUpperCase() || '?';
+    document.getElementById('sign-toggle').textContent = 'Sign out';
+    loadOverview();
+  } else {
+    document.getElementById('user-email').textContent = 'Not signed in';
+    document.getElementById('user-initial').textContent = '?';
+    document.getElementById('sign-toggle').textContent = 'Sign in';
+  }
+};
+
+// Wire sign-in/out via addEventListener — onclick on dynamic elements blocked by CSP
 document.getElementById('sign-toggle').addEventListener('click', () => {
   if (window._supaSession) {
     window._supaSignOut?.();
@@ -1573,6 +1895,26 @@ document.getElementById('sign-toggle').addEventListener('click', () => {
     window._supaSignIn?.();
   }
 });
+
+/* ─── UTILS ──────────────────────────────────────────── */
+function esc(s) {
+  if (s === null || s === undefined) return '';
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+/* ─── MAGNETIC BUTTONS ───────────────────────────────── */
+document.querySelectorAll('button.primary').forEach(btn => {
+  btn.addEventListener('mousemove', e => {
+    const r = btn.getBoundingClientRect();
+    const x = e.clientX - r.left - r.width  / 2;
+    const y = e.clientY - r.top  - r.height / 2;
+    btn.style.transform = `translate(${x * 0.10}px, ${y * 0.10 - 2}px)`;
+  });
+  btn.addEventListener('mouseleave', () => { btn.style.transform = ''; });
+});
+
+/* ─── INIT ───────────────────────────────────────────── */
+loadOverview();
 </script>
 </body>
 </html>
