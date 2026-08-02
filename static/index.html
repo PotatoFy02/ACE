@@ -1,1920 +1,1165 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>ACE — Automated Cybersecurity Engine</title>
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <style>
-    /* ── TOKEN SYSTEM ──────────────────────────────────────────────── */
-    :root {
-      /* Surface */
-      --bg:          #03040a;
-      --bg-2:        #07080f;
-      --surface:     rgba(255,255,255,0.032);
-      --surface-2:   rgba(255,255,255,0.058);
-      --surface-3:   rgba(255,255,255,0.014);
-      --border:      rgba(255,255,255,0.07);
-      --border-hi:   rgba(255,255,255,0.14);
-
-      /* Text */
-      --text:        #eeeef5;
-      --text-dim:    #9898b8;
-      --text-muted:  #4a4a6a;
-
-      /* Accent — electric indigo shifting to cobalt */
-      --a1:          #5b7fff;
-      --a2:          #8b5cf6;
-      --a3:          #06b6d4;
-      --a-glow:      rgba(91,127,255,0.28);
-      --a-dim:       rgba(91,127,255,0.10);
-
-      /* Semantic */
-      --green:       #34d399;
-      --green-dim:   rgba(52,211,153,0.10);
-      --yellow:      #fbbf24;
-      --yellow-dim:  rgba(251,191,36,0.10);
-      --red:         #f87171;
-      --red-dim:     rgba(248,113,113,0.10);
-      --orange:      #fb923c;
-
-      /* Geometry */
-      --r:           10px;
-      --r-lg:        16px;
-      --r-xl:        22px;
-      --blur:        blur(22px);
-      --blur-sm:     blur(10px);
-
-      /* Type scale */
-      --f-xs:  11px;
-      --f-sm:  13px;
-      --f-md:  15px;
-      --f-lg:  18px;
-      --f-xl:  24px;
-      --f-2xl: 32px;
-      --f-3xl: 44px;
-    }
-
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-    html { scroll-behavior: smooth; -webkit-font-smoothing: antialiased; }
-
-    body {
-      font-family: "SF Pro Display", "Inter", -apple-system, BlinkMacSystemFont, sans-serif;
-      background: var(--bg);
-      color: var(--text);
-      min-height: 100vh;
-      line-height: 1.6;
-      overflow-x: hidden;
-    }
-
-    /* ── AMBIENT CANVAS ────────────────────────────────────────────── */
-    .ambient {
-      position: fixed;
-      inset: 0;
-      z-index: 0;
-      pointer-events: none;
-      overflow: hidden;
-    }
-
-    .orb {
-      position: absolute;
-      border-radius: 50%;
-      filter: blur(90px);
-      will-change: transform;
-      animation: drift linear infinite alternate;
-    }
-
-    .orb-1 {
-      width: 700px; height: 700px;
-      background: radial-gradient(circle, rgba(91,127,255,0.14), transparent 70%);
-      top: -200px; left: -160px;
-      animation-duration: 22s;
-    }
-
-    .orb-2 {
-      width: 560px; height: 560px;
-      background: radial-gradient(circle, rgba(139,92,246,0.12), transparent 70%);
-      bottom: -180px; right: -120px;
-      animation-duration: 28s;
-      animation-delay: -10s;
-    }
-
-    .orb-3 {
-      width: 320px; height: 320px;
-      background: radial-gradient(circle, rgba(6,182,212,0.08), transparent 70%);
-      top: 42%; left: 55%;
-      animation-duration: 35s;
-      animation-delay: -5s;
-    }
-
-    @keyframes drift {
-      from { transform: translate(0, 0) scale(1); }
-      to   { transform: translate(50px, 35px) scale(1.12); }
-    }
-
-    /* Dot grid */
-    .dot-grid {
-      position: fixed;
-      inset: 0;
-      z-index: 0;
-      pointer-events: none;
-      background-image: radial-gradient(circle, rgba(255,255,255,0.04) 1px, transparent 1px);
-      background-size: 28px 28px;
-      mask-image: radial-gradient(ellipse 75% 75% at 50% 50%, black 30%, transparent 100%);
-      -webkit-mask-image: radial-gradient(ellipse 75% 75% at 50% 50%, black 30%, transparent 100%);
-    }
-
-    /* ── LAYOUT ────────────────────────────────────────────────────── */
-    .shell {
-      position: relative;
-      z-index: 1;
-      display: grid;
-      grid-template-columns: 220px 1fr;
-      min-height: 100vh;
-    }
-
-    /* ── SIDEBAR NAV ───────────────────────────────────────────────── */
-    .nav {
-      position: sticky;
-      top: 0;
-      height: 100vh;
-      display: flex;
-      flex-direction: column;
-      padding: 28px 16px 24px;
-      border-right: 1px solid var(--border);
-      background: rgba(3,4,10,0.7);
-      backdrop-filter: var(--blur);
-      -webkit-backdrop-filter: var(--blur);
-    }
-
-    .nav-logo {
-      display: flex;
-      align-items: center;
-      gap: 11px;
-      margin-bottom: 40px;
-      padding: 0 6px;
-    }
-
-    /* Signature element: custom canvas hexagon logo mark */
-    .logo-hex {
-      width: 34px;
-      height: 34px;
-      flex-shrink: 0;
-    }
-
-    .logo-text {
-      display: flex;
-      flex-direction: column;
-    }
-
-    .logo-name {
-      font-size: 15px;
-      font-weight: 800;
-      letter-spacing: 0.06em;
-      color: var(--text);
-      line-height: 1;
-    }
-
-    .logo-sub {
-      font-size: 9px;
-      letter-spacing: 0.14em;
-      text-transform: uppercase;
-      color: var(--text-muted);
-      margin-top: 3px;
-    }
-
-    .nav-section {
-      font-size: 9px;
-      font-weight: 700;
-      letter-spacing: 0.14em;
-      text-transform: uppercase;
-      color: var(--text-muted);
-      padding: 0 10px;
-      margin-bottom: 6px;
-      margin-top: 24px;
-    }
-
-    .nav-section:first-of-type { margin-top: 0; }
-
-    .nav-item {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      padding: 8px 10px;
-      border-radius: var(--r);
-      cursor: pointer;
-      font-size: var(--f-sm);
-      color: var(--text-muted);
-      transition: all 0.18s cubic-bezier(0.25,1,0.5,1);
-      border: 1px solid transparent;
-      margin-bottom: 2px;
-      user-select: none;
-      position: relative;
-      overflow: hidden;
-    }
-
-    .nav-item::before {
-      content: '';
-      position: absolute;
-      left: 0; top: 0; bottom: 0;
-      width: 2px;
-      background: linear-gradient(to bottom, var(--a1), var(--a2));
-      opacity: 0;
-      transition: opacity 0.18s;
-      border-radius: 0 2px 2px 0;
-    }
-
-    .nav-item:hover {
-      color: var(--text);
-      background: var(--surface);
-      border-color: var(--border);
-    }
-
-    .nav-item.active {
-      color: var(--text);
-      background: var(--a-dim);
-      border-color: rgba(91,127,255,0.18);
-    }
-
-    .nav-item.active::before { opacity: 1; }
-
-    .nav-icon {
-      width: 15px;
-      height: 15px;
-      opacity: 0.6;
-      flex-shrink: 0;
-      transition: opacity 0.18s;
-    }
-
-    .nav-item.active .nav-icon,
-    .nav-item:hover .nav-icon { opacity: 1; }
-
-    .nav-pill {
-      margin-left: auto;
-      font-size: 9px;
-      font-weight: 700;
-      background: var(--red-dim);
-      color: var(--red);
-      border-radius: 20px;
-      padding: 2px 7px;
-      letter-spacing: 0.04em;
-    }
-
-    .nav-bottom {
-      margin-top: auto;
-      padding-top: 16px;
-      border-top: 1px solid var(--border);
-    }
-
-    .nav-user {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      padding: 8px 10px;
-      border-radius: var(--r);
-      font-size: var(--f-sm);
-      color: var(--text-dim);
-    }
-
-    .user-avatar {
-      width: 28px; height: 28px;
-      border-radius: 50%;
-      background: linear-gradient(135deg, var(--a1), var(--a2));
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 11px;
-      font-weight: 700;
-      color: #fff;
-      flex-shrink: 0;
-    }
-
-    /* ── MAIN CONTENT ──────────────────────────────────────────────── */
-    .main {
-      min-height: 100vh;
-      padding: 32px 40px 80px;
-      overflow-y: auto;
-    }
-
-    .page { display: none; animation: fade-rise 0.4s cubic-bezier(0.25,1,0.5,1) both; }
-    .page.active { display: block; }
-
-    @keyframes fade-rise {
-      from { opacity: 0; transform: translateY(14px); }
-      to   { opacity: 1; transform: translateY(0); }
-    }
-
-    /* ── PAGE HEADER ───────────────────────────────────────────────── */
-    .page-head {
-      display: flex;
-      align-items: flex-start;
-      justify-content: space-between;
-      margin-bottom: 36px;
-      gap: 16px;
-    }
-
-    .page-eyebrow {
-      font-size: var(--f-xs);
-      font-weight: 700;
-      letter-spacing: 0.12em;
-      text-transform: uppercase;
-      color: var(--a1);
-      margin-bottom: 6px;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-
-    .page-eyebrow::before {
-      content: '';
-      width: 5px; height: 5px;
-      border-radius: 50%;
-      background: var(--a1);
-      box-shadow: 0 0 8px var(--a1);
-      animation: pulse-dot 2.5s ease-in-out infinite;
-    }
-
-    @keyframes pulse-dot {
-      0%,100% { opacity: 1; transform: scale(1); }
-      50%      { opacity: 0.4; transform: scale(0.7); }
-    }
-
-    .page-title {
-      font-size: var(--f-2xl);
-      font-weight: 800;
-      letter-spacing: -0.03em;
-      line-height: 1.1;
-      color: var(--text);
-    }
-
-    .page-sub {
-      font-size: var(--f-sm);
-      color: var(--text-muted);
-      margin-top: 8px;
-      max-width: 480px;
-    }
-
-    /* ── GLASS CARD ────────────────────────────────────────────────── */
-    .card {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: var(--r-xl);
-      backdrop-filter: var(--blur-sm);
-      -webkit-backdrop-filter: var(--blur-sm);
-      position: relative;
-      overflow: hidden;
-      transition: border-color 0.2s, transform 0.2s;
-    }
-
-    .card:hover { border-color: var(--border-hi); }
-
-    .card-inner { padding: 24px; }
-
-    /* Top shimmer line on cards */
-    .card::after {
-      content: '';
-      position: absolute;
-      top: 0; left: 10%; right: 10%;
-      height: 1px;
-      background: linear-gradient(90deg, transparent, rgba(91,127,255,0.35), transparent);
-      pointer-events: none;
-    }
-
-    /* ── METRIC GRID ───────────────────────────────────────────────── */
-    .metric-grid {
-      display: grid;
-      grid-template-columns: repeat(4, 1fr);
-      gap: 14px;
-      margin-bottom: 24px;
-    }
-
-    .metric-card {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: var(--r-lg);
-      padding: 20px;
-      transition: all 0.22s cubic-bezier(0.25,1,0.5,1);
-      cursor: default;
-      position: relative;
-      overflow: hidden;
-    }
-
-    .metric-card::before {
-      content: '';
-      position: absolute;
-      inset: 0;
-      border-radius: var(--r-lg);
-      background: radial-gradient(circle at 30% 20%, rgba(91,127,255,0.06), transparent 60%);
-      opacity: 0;
-      transition: opacity 0.3s;
-    }
-
-    .metric-card:hover {
-      border-color: var(--border-hi);
-      transform: translateY(-3px);
-    }
-
-    .metric-card:hover::before { opacity: 1; }
-
-    .metric-label {
-      font-size: var(--f-xs);
-      font-weight: 600;
-      letter-spacing: 0.1em;
-      text-transform: uppercase;
-      color: var(--text-muted);
-      margin-bottom: 12px;
-    }
-
-    .metric-value {
-      font-size: 36px;
-      font-weight: 900;
-      letter-spacing: -0.04em;
-      line-height: 1;
-      color: var(--text);
-    }
-
-    .metric-value.accent { color: var(--a1); }
-    .metric-value.green  { color: var(--green); }
-    .metric-value.red    { color: var(--red); }
-    .metric-value.yellow { color: var(--yellow); }
-
-    .metric-delta {
-      font-size: var(--f-xs);
-      color: var(--text-muted);
-      margin-top: 6px;
-    }
-
-    /* ── READINESS BAR ─────────────────────────────────────────────── */
-    .readiness-wrap { margin-top: 8px; }
-
-    .readiness-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: baseline;
-      margin-bottom: 10px;
-    }
-
-    .readiness-label {
-      font-size: var(--f-xs);
-      font-weight: 700;
-      letter-spacing: 0.1em;
-      text-transform: uppercase;
-      color: var(--text-muted);
-    }
-
-    .readiness-pct {
-      font-size: var(--f-xl);
-      font-weight: 900;
-      letter-spacing: -0.03em;
-      color: var(--green);
-    }
-
-    .readiness-track {
-      height: 5px;
-      background: rgba(255,255,255,0.05);
-      border-radius: 3px;
-      overflow: hidden;
-    }
-
-    .readiness-fill {
-      height: 100%;
-      border-radius: 3px;
-      background: linear-gradient(90deg, var(--green), #059669);
-      box-shadow: 0 0 12px rgba(52,211,153,0.5);
-      transition: width 1.2s cubic-bezier(0.25,1,0.5,1);
-    }
-
-    /* ── ACTIVITY FEED ─────────────────────────────────────────────── */
-    .feed-item {
-      display: flex;
-      align-items: flex-start;
-      gap: 12px;
-      padding: 12px 0;
-      border-bottom: 1px solid var(--border);
-      transition: all 0.18s;
-    }
-
-    .feed-item:last-child { border-bottom: none; }
-    .feed-item:hover { padding-left: 4px; }
-
-    .feed-dot {
-      width: 7px; height: 7px;
-      border-radius: 50%;
-      margin-top: 6px;
-      flex-shrink: 0;
-    }
-
-    .feed-dot.green  { background: var(--green); box-shadow: 0 0 6px var(--green); }
-    .feed-dot.yellow { background: var(--yellow); box-shadow: 0 0 6px var(--yellow); }
-    .feed-dot.red    { background: var(--red); box-shadow: 0 0 6px var(--red); }
-    .feed-dot.blue   { background: var(--a1); box-shadow: 0 0 6px var(--a1); }
-
-    .feed-text { font-size: var(--f-sm); color: var(--text-dim); line-height: 1.5; }
-    .feed-time { font-size: var(--f-xs); color: var(--text-muted); margin-top: 2px; }
-
-    /* ── SECTION LABEL ─────────────────────────────────────────────── */
-    .sec-label {
-      font-size: var(--f-xs);
-      font-weight: 700;
-      letter-spacing: 0.12em;
-      text-transform: uppercase;
-      color: var(--text-muted);
-      margin: 32px 0 14px;
-      display: flex;
-      align-items: center;
-      gap: 10px;
-    }
-
-    .sec-label::after {
-      content: '';
-      flex: 1;
-      height: 1px;
-      background: var(--border);
-    }
-
-    /* ── ROLE CARDS (sweeper status) ───────────────────────────────── */
-    .role-card {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: var(--r-lg);
-      padding: 18px 20px;
-      margin-bottom: 10px;
-      display: grid;
-      grid-template-columns: 1fr auto;
-      gap: 16px;
-      align-items: center;
-      transition: all 0.2s cubic-bezier(0.25,1,0.5,1);
-      position: relative;
-      overflow: hidden;
-    }
-
-    .role-card::before {
-      content: '';
-      position: absolute;
-      left: 0; top: 0; bottom: 0;
-      width: 3px;
-      border-radius: 0 2px 2px 0;
-    }
-
-    .role-card.state-active::before        { background: var(--green); }
-    .role-card.state-pending::before       { background: var(--yellow); }
-    .role-card.state-ready::before         { background: var(--orange); }
-    .role-card.state-pr::before            { background: var(--a1); }
-
-    .role-card:hover {
-      border-color: var(--border-hi);
-      transform: translateX(3px);
-    }
-
-    .role-name {
-      font-size: var(--f-md);
-      font-weight: 600;
-      color: var(--text);
-      margin-bottom: 3px;
-      font-family: "SF Mono", "Fira Code", monospace;
-      font-size: 13px;
-    }
-
-    .role-repo {
-      font-size: var(--f-xs);
-      color: var(--text-muted);
-    }
-
-    .role-right { text-align: right; }
-
-    .state-pill {
-      display: inline-flex;
-      align-items: center;
-      gap: 5px;
-      font-size: var(--f-xs);
-      font-weight: 700;
-      letter-spacing: 0.06em;
-      text-transform: uppercase;
-      padding: 4px 10px;
-      border-radius: 20px;
-      margin-bottom: 4px;
-    }
-
-    .state-pill.active  { background: var(--green-dim);  color: var(--green); }
-    .state-pill.pending { background: var(--yellow-dim); color: var(--yellow); }
-    .state-pill.ready   { background: rgba(249,115,22,0.1); color: var(--orange); }
-    .state-pill.pr      { background: var(--a-dim);      color: var(--a1); }
-
-    .countdown {
-      font-size: var(--f-xs);
-      color: var(--text-muted);
-    }
-
-    .countdown b { color: var(--yellow); }
-
-    /* ── COUNTDOWN RING ────────────────────────────────────────────── */
-    .ring-wrap {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-    }
-
-    /* ── THREAT CARDS ──────────────────────────────────────────────── */
-    .threat-card {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: var(--r-lg);
-      padding: 20px;
-      margin-bottom: 10px;
-      border-left: 3px solid transparent;
-      transition: all 0.2s cubic-bezier(0.25,1,0.5,1);
-    }
-
-    .threat-card:hover {
-      border-color: var(--border-hi);
-      transform: translateX(4px);
-    }
-
-    .threat-card.critical { border-left-color: var(--red); }
-    .threat-card.high     { border-left-color: var(--orange); }
-    .threat-card.medium   { border-left-color: var(--yellow); }
-    .threat-card.low      { border-left-color: var(--green); }
-
-    .threat-top {
-      display: flex;
-      justify-content: space-between;
-      align-items: flex-start;
-      gap: 12px;
-      margin-bottom: 8px;
-    }
-
-    .threat-title {
-      font-size: var(--f-md);
-      font-weight: 700;
-      color: var(--text);
-      letter-spacing: -0.01em;
-    }
-
-    .badge {
-      font-size: 9px;
-      font-weight: 800;
-      padding: 3px 9px;
-      border-radius: 20px;
-      white-space: nowrap;
-      letter-spacing: 0.08em;
-      text-transform: uppercase;
-      flex-shrink: 0;
-    }
-
-    .badge.critical { background: var(--red-dim);           color: var(--red);    border: 1px solid rgba(248,113,113,0.2); }
-    .badge.high     { background: rgba(249,115,22,0.1);     color: var(--orange); border: 1px solid rgba(249,115,22,0.2); }
-    .badge.medium   { background: var(--yellow-dim);        color: var(--yellow); border: 1px solid rgba(251,191,36,0.2); }
-    .badge.low      { background: var(--green-dim);         color: var(--green);  border: 1px solid rgba(52,211,153,0.2); }
-    .badge.pending  { background: var(--yellow-dim);        color: var(--yellow); border: 1px solid rgba(251,191,36,0.2); }
-    .badge.accepted { background: var(--green-dim);         color: var(--green);  border: 1px solid rgba(52,211,153,0.2); }
-    .badge.rejected { background: var(--red-dim);           color: var(--red);    border: 1px solid rgba(248,113,113,0.2); }
-
-    .threat-meta {
-      font-size: var(--f-xs);
-      color: var(--text-muted);
-      margin-bottom: 6px;
-      display: flex;
-      gap: 10px;
-      flex-wrap: wrap;
-    }
-
-    .threat-soc2 {
-      font-size: var(--f-xs);
-      color: var(--a1);
-      font-weight: 600;
-      letter-spacing: 0.04em;
-      margin-bottom: 10px;
-    }
-
-    .threat-desc {
-      font-size: var(--f-sm);
-      color: var(--text-dim);
-      line-height: 1.7;
-      margin-bottom: 12px;
-    }
-
-    .threat-mitigations {
-      list-style: none;
-      margin-bottom: 14px;
-    }
-
-    .threat-mitigations li {
-      font-size: 12px;
-      color: var(--text-muted);
-      padding: 2px 0 2px 18px;
-      position: relative;
-      line-height: 1.5;
-    }
-
-    .threat-mitigations li::before {
-      content: "→";
-      position: absolute;
-      left: 0;
-      color: var(--a1);
-      font-size: 11px;
-    }
-
-    .threat-actions {
-      display: flex;
-      gap: 8px;
-      flex-wrap: wrap;
-      align-items: center;
-      padding-top: 14px;
-      border-top: 1px solid var(--border);
-    }
-
-    /* ── EVIDENCE CARDS ────────────────────────────────────────────── */
-    .evidence-card {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: var(--r-lg);
-      padding: 20px;
-      margin-bottom: 10px;
-      display: grid;
-      grid-template-columns: 1fr auto;
-      gap: 20px;
-      align-items: center;
-      transition: all 0.2s cubic-bezier(0.25,1,0.5,1);
-    }
-
-    .evidence-card:hover {
-      border-color: var(--border-hi);
-      transform: translateY(-2px);
-      box-shadow: 0 8px 32px rgba(0,0,0,0.3);
-    }
-
-    .evidence-name {
-      font-size: var(--f-md);
-      font-weight: 700;
-      color: var(--text);
-      margin-bottom: 4px;
-    }
-
-    .evidence-meta {
-      font-size: var(--f-xs);
-      color: var(--text-muted);
-      display: flex;
-      gap: 12px;
-      flex-wrap: wrap;
-    }
-
-    .evidence-sha {
-      font-family: "SF Mono", "Fira Code", monospace;
-      background: var(--surface-2);
-      border: 1px solid var(--border);
-      padding: 2px 8px;
-      border-radius: 5px;
-      font-size: 11px;
-      color: var(--a1);
-    }
-
-    /* ── GENERATE FORM ─────────────────────────────────────────────── */
-    .tab-bar {
-      display: flex;
-      gap: 4px;
-      background: rgba(255,255,255,0.03);
-      border: 1px solid var(--border);
-      border-radius: var(--r-lg);
-      padding: 4px;
-      margin-bottom: 20px;
-    }
-
-    .tab-btn {
-      flex: 1;
-      background: transparent;
-      border: none;
-      color: var(--text-muted);
-      font-size: var(--f-sm);
-      font-weight: 500;
-      padding: 8px 12px;
-      border-radius: 10px;
-      cursor: pointer;
-      transition: all 0.2s cubic-bezier(0.25,1,0.5,1);
-      font-family: inherit;
-    }
-
-    .tab-btn:hover:not(.active) {
-      color: var(--text);
-      background: var(--surface-2);
-    }
-
-    .tab-btn.active {
-      background: linear-gradient(135deg, var(--a1), var(--a2));
-      color: #fff;
-      box-shadow: 0 2px 14px var(--a-glow);
-    }
-
-    input, textarea, select {
-      width: 100%;
-      background: rgba(255,255,255,0.04);
-      border: 1px solid var(--border);
-      border-radius: var(--r);
-      color: var(--text);
-      font-size: var(--f-sm);
-      padding: 10px 14px;
-      margin: 6px 0;
-      outline: none;
-      transition: all 0.2s;
-      font-family: inherit;
-    }
-
-    input:focus, textarea:focus, select:focus {
-      border-color: var(--a1);
-      background: rgba(91,127,255,0.06);
-      box-shadow: 0 0 0 3px rgba(91,127,255,0.12);
-    }
-
-    input::placeholder, textarea::placeholder { color: var(--text-muted); }
-    textarea { height: 110px; resize: vertical; }
-
-    select option { background: #0e0f1a; }
-
-    /* ── BUTTONS ───────────────────────────────────────────────────── */
-    button, .btn {
-      cursor: pointer;
-      font-family: inherit;
-      font-size: var(--f-sm);
-      font-weight: 600;
-      border-radius: var(--r);
-      padding: 9px 18px;
-      border: 1px solid var(--border);
-      background: var(--surface-2);
-      color: var(--text);
-      transition: all 0.22s cubic-bezier(0.25,1,0.5,1);
-      display: inline-flex;
-      align-items: center;
-      gap: 7px;
-      text-decoration: none;
-      white-space: nowrap;
-    }
-
-    button:hover, .btn:hover {
-      border-color: var(--border-hi);
-      transform: translateY(-1px);
-    }
-
-    button:active { transform: scale(0.97); }
-
-    button.primary {
-      background: linear-gradient(135deg, var(--a1), var(--a2));
-      border: none;
-      color: #fff;
-      box-shadow: 0 4px 18px var(--a-glow);
-    }
-
-    button.primary:hover {
-      box-shadow: 0 6px 28px rgba(91,127,255,0.5);
-      transform: translateY(-2px);
-    }
-
-    button.sm {
-      font-size: 11px;
-      padding: 4px 10px;
-    }
-
-    button.danger {
-      border-color: rgba(248,113,113,0.2);
-      color: var(--red);
-    }
-
-    button.danger:hover {
-      background: var(--red-dim);
-    }
-
-    /* ── DROP ZONE ─────────────────────────────────────────────────── */
-    .drop {
-      border: 1px dashed rgba(255,255,255,0.10);
-      border-radius: var(--r-xl);
-      padding: 40px 24px;
-      text-align: center;
-      color: var(--text-muted);
-      cursor: pointer;
-      margin: 8px 0;
-      transition: all 0.25s cubic-bezier(0.25,1,0.5,1);
-      background: var(--surface-3);
-    }
-
-    .drop:hover, .drop.drag-over {
-      border-color: var(--a1);
-      background: var(--a-dim);
-      color: var(--text);
-    }
-
-    .drop-icon { font-size: 30px; margin-bottom: 10px; display: block; transition: transform 0.3s cubic-bezier(0.25,1,0.5,1); }
-    .drop:hover .drop-icon { transform: translateY(-5px); }
-    .drop p { font-size: var(--f-sm); }
-    .drop small { font-size: var(--f-xs); color: var(--text-muted); margin-top: 5px; display: block; }
-
-    /* ── STATUS LINE ───────────────────────────────────────────────── */
-    .status {
-      font-size: var(--f-sm);
-      color: var(--text-muted);
-      margin: 8px 0 0;
-      min-height: 20px;
-      transition: color 0.2s;
-    }
-    .status.err { color: var(--red); }
-    .status.ok  { color: var(--green); }
-
-    /* ── LOADING SKELETON ──────────────────────────────────────────── */
-    .skeleton {
-      background: linear-gradient(90deg, var(--surface) 25%, var(--surface-2) 50%, var(--surface) 75%);
-      background-size: 200% 100%;
-      animation: shimmer 1.4s infinite;
-      border-radius: var(--r);
-    }
-
-    @keyframes shimmer {
-      0%   { background-position: 200% 0; }
-      100% { background-position: -200% 0; }
-    }
-
-    /* ── SPINNER ───────────────────────────────────────────────────── */
-    .spinner {
-      width: 16px; height: 16px;
-      border: 2px solid rgba(255,255,255,0.1);
-      border-top-color: var(--a1);
-      border-radius: 50%;
-      animation: spin 0.7s linear infinite;
-      flex-shrink: 0;
-    }
-
-    @keyframes spin { to { transform: rotate(360deg); } }
-
-    /* ── EMPTY STATE ───────────────────────────────────────────────── */
-    .empty {
-      text-align: center;
-      padding: 64px 24px;
-      color: var(--text-muted);
-    }
-
-    .empty-icon { font-size: 40px; margin-bottom: 16px; opacity: 0.4; }
-    .empty h3 { font-size: var(--f-lg); font-weight: 700; color: var(--text-dim); margin-bottom: 8px; }
-    .empty p  { font-size: var(--f-sm); max-width: 340px; margin: 0 auto 20px; line-height: 1.7; }
-
-    /* ── TWO-COL GRID ──────────────────────────────────────────────── */
-    .grid-2 {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 16px;
-      margin-bottom: 16px;
-    }
-
-    /* ── ROW UTILS ─────────────────────────────────────────────────── */
-    .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
-    .ml-auto { margin-left: auto; }
-
-    /* ── TOAST ─────────────────────────────────────────────────────── */
-    .toast-wrap {
-      position: fixed;
-      bottom: 28px;
-      right: 28px;
-      z-index: 999;
-      display: flex;
-      flex-direction: column;
-      gap: 10px;
-    }
-
-    .toast {
-      background: var(--bg-2);
-      border: 1px solid var(--border-hi);
-      border-radius: var(--r-lg);
-      padding: 12px 18px;
-      font-size: var(--f-sm);
-      color: var(--text);
-      box-shadow: 0 8px 32px rgba(0,0,0,0.5);
-      animation: toast-in 0.35s cubic-bezier(0.25,1,0.5,1) both;
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      max-width: 340px;
-    }
-
-    @keyframes toast-in {
-      from { opacity: 0; transform: translateY(14px) scale(0.96); }
-      to   { opacity: 1; transform: translateY(0) scale(1); }
-    }
-
-    /* ── RESPONSIVE ────────────────────────────────────────────────── */
-    @media (max-width: 860px) {
-      .shell { grid-template-columns: 1fr; }
-      .nav { display: none; }
-      .main { padding: 20px 16px 60px; }
-      .metric-grid { grid-template-columns: repeat(2, 1fr); }
-      .grid-2 { grid-template-columns: 1fr; }
-    }
-
-    @media (prefers-reduced-motion: reduce) {
-      *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
-    }
-  </style>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#05060A">
+<meta name="description" content="ACE — Automated Cybersecurity Engine. Continuous IAM least-privilege enforcement with audit-grade SOC 2 CC6.3 evidence.">
+<title>ACE — Automated Cybersecurity Engine</title>
+
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+<link rel="preconnect" href="https://ubldspvbpejtnxniqvne.supabase.co" crossorigin>
+<link rel="dns-prefetch" href="https://ubldspvbpejtnxniqvne.supabase.co">
+
+<style>
+/* ═══════════════════════════════════════════════════════════════════════
+   ACE DESIGN SYSTEM — "OBSIDIAN / LUMEN"
+   Layer 0  Tokens
+   Layer 1  Reset + Typographic Rhythm
+   Layer 2  Ambient Field
+   Layer 3  Structure  (Rail / Stage)
+   Layer 4  Primitives (Glass, Notch, Button, Field, Pill)
+   Layer 5  Domain Components
+   Layer 6  Monetization Surfaces
+   Layer 7  Motion Library
+   Layer 8  Adaptive + Accessibility
+   ═══════════════════════════════════════════════════════════════════════ */
+
+/* ── LAYER 0 · TOKENS ───────────────────────────────────────────────── */
+:root {
+  /* Surface — true black foundation, elevation by luminance not by shadow */
+  --void:        #000000;
+  --bg:          #05060A;
+  --bg-2:        #080A11;
+  --bg-3:        #0C0F18;
+  --scrim:       rgba(0,0,0,0.72);
+
+  /* Glass — frosted layers. Opacity is the elevation axis. */
+  --glass-1:     rgba(255,255,255,0.026);
+  --glass-2:     rgba(255,255,255,0.052);
+  --glass-3:     rgba(255,255,255,0.088);
+  --glass-sunk:  rgba(0,0,0,0.30);
+
+  /* Hairlines — 1px optical borders */
+  --line:        rgba(255,255,255,0.070);
+  --line-hi:     rgba(255,255,255,0.155);
+  --line-lumen:  rgba(91,127,255,0.28);
+  --line-aurum:  rgba(245,200,107,0.30);
+
+  /* Ink */
+  --ink:         #F4F5FA;
+  --ink-2:       #A7ABC4;
+  --ink-3:       #6A6F8C;
+  --ink-4:       #444962;
+
+  /* Lumen — the product accent. Cobalt → violet → cyan triad. */
+  --lumen:       #5B7FFF;
+  --lumen-2:     #8B5CF6;
+  --lumen-3:     #06B6D4;
+  --lumen-wash:  rgba(91,127,255,0.10);
+  --lumen-halo:  rgba(91,127,255,0.30);
+
+  /* Aurum — RESERVED EXCLUSIVELY FOR MONETIZATION.
+     Nothing that is not a revenue surface may use gold. This is what makes
+     "upgrade" pre-attentively findable without shouting. */
+  --aurum:       #F5C86B;
+  --aurum-2:     #E0A94A;
+  --aurum-wash:  rgba(245,200,107,0.09);
+  --aurum-halo:  rgba(245,200,107,0.26);
+  --aurum-ink:   #170F02;
+
+  /* Semantic */
+  --ok:          #34D399;  --ok-wash:    rgba(52,211,153,0.10);
+  --warn:        #FBBF24;  --warn-wash:  rgba(251,191,36,0.10);
+  --crit:        #F87171;  --crit-wash:  rgba(248,113,113,0.10);
+  --high:        #FB923C;  --high-wash:  rgba(251,146,60,0.10);
+
+  /* Geometry */
+  --r-xs: 6px; --r-sm: 9px; --r-md: 13px; --r-lg: 18px; --r-xl: 26px; --r-full: 999px;
+  --notch: 14px;                     /* canvas-painted corner cut */
+
+  /* Blur radii */
+  --blur-xs: blur(8px);
+  --blur-sm: blur(18px);
+  --blur-md: blur(32px);
+  --blur-lg: blur(64px);
+  --blur-orb: blur(110px);
+
+  /* Type — editorial scale, 1.25 minor-third, optically corrected tracking */
+  --f-micro: 10px; --f-xs: 11.5px; --f-sm: 13px;  --f-md: 15px;
+  --f-lg:    18px; --f-xl: 23px;   --f-2xl: 31px; --f-3xl: 44px; --f-4xl: 62px;
+
+  --tk-tight:  -0.035em;   /* display */
+  --tk-snug:   -0.018em;   /* headings */
+  --tk-normal:  0em;
+  --tk-wide:    0.085em;   /* eyebrows */
+  --tk-widest:  0.16em;    /* section rubrics */
+
+  /* Vertical rhythm — every block spacing is a multiple of 4 */
+  --s-1: 4px;  --s-2: 8px;  --s-3: 12px; --s-4: 16px; --s-5: 20px;
+  --s-6: 24px; --s-8: 32px; --s-10: 40px; --s-12: 48px; --s-16: 64px;
+
+  /* Motion — the entire product uses exactly five curves */
+  --e-swift:  cubic-bezier(0.25, 1, 0.5, 1);      /* default UI response  */
+  --e-expo:   cubic-bezier(0.16, 1, 0.3, 1);      /* entrances, reveals   */
+  --e-spring: cubic-bezier(0.34, 1.56, 0.64, 1);  /* confirm / pop        */
+  --e-glide:  cubic-bezier(0.65, 0, 0.35, 1);     /* symmetric transforms */
+  --e-decel:  cubic-bezier(0.05, 0.7, 0.1, 1);    /* physics settle       */
+
+  --d-instant: 90ms;  --d-fast: 150ms;  --d-base: 240ms;
+  --d-slow:    420ms; --d-cine: 720ms;  --d-epic: 1100ms;
+
+  --stagger: 42ms;    /* per-item list cadence */
+
+  /* Elevation */
+  --lift-1: 0 1px 2px rgba(0,0,0,.40);
+  --lift-2: 0 8px 28px rgba(0,0,0,.44);
+  --lift-3: 0 22px 70px rgba(0,0,0,.62);
+
+  --rail-w: 244px;
+}
+
+/* ── LAYER 1 · RESET + RHYTHM ───────────────────────────────────────── */
+*,*::before,*::after { box-sizing:border-box; margin:0; padding:0; }
+
+html {
+  scroll-behavior:smooth;
+  -webkit-font-smoothing:antialiased;
+  -moz-osx-font-smoothing:grayscale;
+  text-rendering:optimizeLegibility;
+}
+
+body {
+  font-family:"SF Pro Display","Inter var","Inter",-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;
+  font-feature-settings:"cv02","cv03","cv04","ss01","tnum";
+  background:var(--bg);
+  color:var(--ink);
+  min-height:100vh;
+  line-height:1.58;
+  overflow-x:hidden;
+  overscroll-behavior-y:none;
+}
+
+.mono { font-family:"SF Mono","JetBrains Mono","Fira Code",ui-monospace,monospace; font-feature-settings:"tnum"; }
+
+::selection { background:rgba(91,127,255,0.30); color:#fff; }
+
+::-webkit-scrollbar { width:9px; height:9px; }
+::-webkit-scrollbar-track { background:transparent; }
+::-webkit-scrollbar-thumb { background:rgba(255,255,255,0.07); border-radius:var(--r-full); border:2px solid transparent; background-clip:content-box; }
+::-webkit-scrollbar-thumb:hover { background:rgba(255,255,255,0.16); background-clip:content-box; }
+
+:focus-visible { outline:2px solid var(--lumen); outline-offset:3px; border-radius:var(--r-xs); }
+:focus:not(:focus-visible) { outline:none; }
+
+.sr { position:absolute; width:1px; height:1px; padding:0; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; border:0; }
+
+/* ── LAYER 2 · AMBIENT FIELD ────────────────────────────────────────── */
+.field { position:fixed; inset:0; z-index:0; pointer-events:none; overflow:hidden; contain:strict; }
+
+/* Pointer-reactive gradient mesh painted on canvas (see paintMesh in app.js) */
+#mesh { position:absolute; inset:0; width:100%; height:100%; opacity:.85; }
+
+.orb { position:absolute; border-radius:50%; filter:var(--blur-orb); will-change:transform; animation:drift linear infinite alternate; }
+.orb-a { width:760px; height:760px; top:-240px; left:-190px;
+         background:radial-gradient(circle, rgba(91,127,255,.15), transparent 68%); animation-duration:26s; }
+.orb-b { width:620px; height:620px; bottom:-220px; right:-150px;
+         background:radial-gradient(circle, rgba(139,92,246,.13), transparent 68%); animation-duration:34s; animation-delay:-12s; }
+.orb-c { width:380px; height:380px; top:40%; left:52%;
+         background:radial-gradient(circle, rgba(6,182,212,.09), transparent 70%); animation-duration:44s; animation-delay:-6s; }
+
+@keyframes drift {
+  from { transform:translate3d(0,0,0) scale(1); }
+  to   { transform:translate3d(58px,40px,0) scale(1.14); }
+}
+
+.weave {
+  position:fixed; inset:0; z-index:0; pointer-events:none;
+  background-image:radial-gradient(circle, rgba(255,255,255,.045) 1px, transparent 1px);
+  background-size:30px 30px;
+  -webkit-mask-image:radial-gradient(ellipse 78% 72% at 50% 42%, #000 26%, transparent 100%);
+          mask-image:radial-gradient(ellipse 78% 72% at 50% 42%, #000 26%, transparent 100%);
+}
+
+/* Cinematic vignette — pushes focus to centre, reinforces "true black" frame */
+.vignette {
+  position:fixed; inset:0; z-index:0; pointer-events:none;
+  background:radial-gradient(ellipse 120% 90% at 50% 40%, transparent 42%, rgba(0,0,0,.55) 100%);
+}
+
+/* ── LAYER 3 · STRUCTURE ────────────────────────────────────────────── */
+.shell { position:relative; z-index:1; display:grid; grid-template-columns:var(--rail-w) 1fr; min-height:100vh; }
+
+/* Kinetic Rail */
+.rail {
+  position:sticky; top:0; height:100vh;
+  display:flex; flex-direction:column;
+  padding:var(--s-8) var(--s-4) var(--s-5);
+  border-right:1px solid var(--line);
+  background:linear-gradient(180deg, rgba(5,6,10,.86), rgba(5,6,10,.74));
+  backdrop-filter:var(--blur-md); -webkit-backdrop-filter:var(--blur-md);
+  z-index:20;
+}
+
+.stage { min-height:100vh; padding:var(--s-8) var(--s-10) 96px; max-width:1480px; }
+
+.view { display:none; }
+.view.on { display:block; animation:view-in var(--d-slow) var(--e-expo) both; }
+@keyframes view-in { from { opacity:0; transform:translate3d(0,16px,0); } to { opacity:1; transform:none; } }
+
+/* ── Rail: identity ─────────────────────────────────────────────────── */
+.brand { display:flex; align-items:center; gap:11px; padding:0 var(--s-2); margin-bottom:var(--s-8); }
+.brand-mark { width:36px; height:36px; flex-shrink:0; }
+.brand-name { font-size:15px; font-weight:800; letter-spacing:var(--tk-wide); line-height:1; }
+.brand-sub  { font-size:9px; letter-spacing:var(--tk-widest); text-transform:uppercase; color:var(--ink-4); margin-top:4px; }
+
+.rubric {
+  font-size:9px; font-weight:700; letter-spacing:var(--tk-widest); text-transform:uppercase;
+  color:var(--ink-4); padding:0 10px; margin:var(--s-6) 0 var(--s-2);
+}
+.rubric:first-of-type { margin-top:0; }
+
+.nav-scroll { overflow-y:auto; margin:0 -4px; padding:0 4px; flex:1; }
+
+.nav-i {
+  position:relative; display:flex; align-items:center; gap:11px;
+  padding:9px 10px; margin-bottom:2px;
+  border:1px solid transparent; border-radius:var(--r-md);
+  font-size:var(--f-sm); font-weight:500; color:var(--ink-3);
+  cursor:pointer; user-select:none; overflow:hidden;
+  transition:color var(--d-fast) var(--e-swift),
+             background var(--d-fast) var(--e-swift),
+             border-color var(--d-fast) var(--e-swift),
+             transform var(--d-fast) var(--e-swift);
+  -webkit-tap-highlight-color:transparent;
+}
+.nav-i::before {
+  content:''; position:absolute; left:0; top:50%; width:2px; height:0;
+  background:linear-gradient(180deg,var(--lumen),var(--lumen-2));
+  border-radius:0 2px 2px 0; opacity:0;
+  transition:height var(--d-base) var(--e-expo), opacity var(--d-fast), top var(--d-base) var(--e-expo);
+}
+.nav-i:hover { color:var(--ink); background:var(--glass-1); border-color:var(--line); transform:translateX(2px); }
+.nav-i.on { color:var(--ink); background:var(--lumen-wash); border-color:var(--line-lumen); }
+.nav-i.on::before { height:60%; top:20%; opacity:1; }
+.nav-i .ic { width:15px; height:15px; flex-shrink:0; opacity:.55; transition:opacity var(--d-fast); }
+.nav-i:hover .ic, .nav-i.on .ic { opacity:1; }
+
+.tag {
+  margin-left:auto; font-size:9px; font-weight:800; letter-spacing:.05em;
+  padding:2px 7px; border-radius:var(--r-full);
+  background:var(--crit-wash); color:var(--crit);
+}
+.tag.aurum { background:var(--aurum-wash); color:var(--aurum); border:1px solid var(--line-aurum); }
+
+.rail-foot { margin-top:auto; padding-top:var(--s-4); border-top:1px solid var(--line); }
+
+.acct { display:flex; align-items:center; gap:10px; padding:8px; border-radius:var(--r-md);
+        cursor:pointer; transition:background var(--d-fast) var(--e-swift); }
+.acct:hover { background:var(--glass-1); }
+.avatar {
+  width:30px; height:30px; border-radius:50%; flex-shrink:0;
+  background:linear-gradient(135deg,var(--lumen),var(--lumen-2));
+  display:grid; place-items:center; font-size:11px; font-weight:800; color:#fff;
+  box-shadow:0 0 0 1px rgba(255,255,255,.10) inset;
+}
+.acct-mail { font-size:12px; color:var(--ink-2); font-weight:500; max-width:150px;
+             overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.acct-act  { font-size:10px; color:var(--ink-4); margin-top:1px; }
+
+/* ── LAYER 4 · PRIMITIVES ───────────────────────────────────────────── */
+.glass {
+  position:relative; overflow:hidden;
+  background:var(--glass-1);
+  border:1px solid var(--line);
+  border-radius:var(--r-xl);
+  backdrop-filter:var(--blur-sm); -webkit-backdrop-filter:var(--blur-sm);
+  transition:border-color var(--d-base) var(--e-swift), transform var(--d-base) var(--e-swift), box-shadow var(--d-base) var(--e-swift);
+}
+.glass:hover { border-color:var(--line-hi); }
+/* Specular top edge — the single most "expensive looking" 1px in the system */
+.glass::after {
+  content:''; position:absolute; top:0; left:12%; right:12%; height:1px; pointer-events:none;
+  background:linear-gradient(90deg, transparent, rgba(91,127,255,.42), transparent);
+}
+.pad { padding:var(--s-6); }
+.pad-sm { padding:var(--s-4); }
+
+/* Notched panel — border drawn by canvas painter, NOT by CSS.
+   The element itself is border-less; <canvas class="notch-paint"> sits behind. */
+.notched { position:relative; border:none !important; border-radius:0 !important; background:transparent !important; }
+.notched > .notch-paint { position:absolute; inset:0; width:100%; height:100%; pointer-events:none; z-index:0; }
+.notched > .notch-body  { position:relative; z-index:1; }
+
+/* Buttons */
+.btn {
+  position:relative; display:inline-flex; align-items:center; justify-content:center; gap:7px;
+  font-family:inherit; font-size:var(--f-sm); font-weight:600; letter-spacing:-0.005em;
+  padding:10px 18px; border-radius:var(--r-md); white-space:nowrap; cursor:pointer;
+  border:1px solid var(--line); background:var(--glass-2); color:var(--ink);
+  text-decoration:none; overflow:hidden;
+  transition:transform var(--d-base) var(--e-spring),
+             border-color var(--d-fast) var(--e-swift),
+             background var(--d-fast) var(--e-swift),
+             box-shadow var(--d-base) var(--e-swift);
+  will-change:transform;
+  -webkit-tap-highlight-color:transparent;
+}
+.btn:hover  { border-color:var(--line-hi); background:var(--glass-3); }
+.btn:active { transform:scale(.965) !important; transition-duration:var(--d-instant); }
+.btn[disabled],.btn[aria-busy="true"] { opacity:.5; pointer-events:none; }
+
+/* Sheen sweep on primary/aurum — pure CSS, GPU-only */
+.btn--primary, .btn--aurum { border:none; }
+.btn--primary { background:linear-gradient(135deg,var(--lumen),var(--lumen-2)); color:#fff; box-shadow:0 4px 20px var(--lumen-halo); }
+.btn--primary:hover { box-shadow:0 8px 34px rgba(91,127,255,.52); }
+.btn--aurum   { background:linear-gradient(135deg,var(--aurum),var(--aurum-2)); color:var(--aurum-ink); font-weight:750; box-shadow:0 4px 20px var(--aurum-halo); }
+.btn--aurum:hover { box-shadow:0 8px 36px rgba(245,200,107,.46); }
+.btn--primary::before, .btn--aurum::before {
+  content:''; position:absolute; inset:0; pointer-events:none;
+  background:linear-gradient(105deg, transparent 38%, rgba(255,255,255,.30) 50%, transparent 62%);
+  transform:translateX(-130%);
+}
+.btn--primary:hover::before, .btn--aurum:hover::before { animation:sheen 820ms var(--e-glide); }
+@keyframes sheen { to { transform:translateX(130%); } }
+
+.btn--ghost { background:transparent; }
+.btn--sm    { font-size:11.5px; padding:5px 11px; border-radius:var(--r-sm); gap:5px; }
+.btn--danger{ border-color:rgba(248,113,113,.24); color:var(--crit); background:transparent; }
+.btn--danger:hover { background:var(--crit-wash); }
+.btn--block { width:100%; }
+
+/* Fields */
+input,textarea,select {
+  width:100%; font-family:inherit; font-size:var(--f-sm); color:var(--ink);
+  background:var(--glass-sunk); border:1px solid var(--line); border-radius:var(--r-md);
+  padding:11px 14px; margin:6px 0; outline:none;
+  transition:border-color var(--d-fast) var(--e-swift), background var(--d-fast), box-shadow var(--d-fast);
+}
+input:hover,textarea:hover,select:hover { border-color:var(--line-hi); }
+input:focus,textarea:focus,select:focus {
+  border-color:var(--lumen); background:rgba(91,127,255,.06); box-shadow:0 0 0 3px rgba(91,127,255,.14);
+}
+input::placeholder,textarea::placeholder { color:var(--ink-4); }
+textarea { min-height:132px; resize:vertical; line-height:1.65; }
+select { cursor:pointer; appearance:none; padding-right:32px;
+  background-image:linear-gradient(45deg,transparent 50%,var(--ink-3) 50%),linear-gradient(135deg,var(--ink-3) 50%,transparent 50%);
+  background-position:calc(100% - 16px) 52%, calc(100% - 11px) 52%;
+  background-size:5px 5px, 5px 5px; background-repeat:no-repeat; }
+select option { background:#0C0F18; color:var(--ink); }
+.field-w { width:auto; margin:0; }
+
+/* Pills + badges */
+.pill {
+  display:inline-flex; align-items:center; gap:5px;
+  font-size:var(--f-xs); font-weight:700; letter-spacing:.06em; text-transform:uppercase;
+  padding:4px 10px; border-radius:var(--r-full); border:1px solid transparent; white-space:nowrap;
+}
+.pill--ok      { background:var(--ok-wash);   color:var(--ok);    border-color:rgba(52,211,153,.22); }
+.pill--warn    { background:var(--warn-wash); color:var(--warn);  border-color:rgba(251,191,36,.22); }
+.pill--high    { background:var(--high-wash); color:var(--high);  border-color:rgba(251,146,60,.22); }
+.pill--crit    { background:var(--crit-wash); color:var(--crit);  border-color:rgba(248,113,113,.22); }
+.pill--lumen   { background:var(--lumen-wash);color:var(--lumen); border-color:var(--line-lumen); }
+.pill--aurum   { background:var(--aurum-wash);color:var(--aurum); border-color:var(--line-aurum); }
+.pill--mute    { background:var(--glass-2);   color:var(--ink-3); border-color:var(--line); }
+.pill--xs      { font-size:9px; padding:3px 8px; letter-spacing:.09em; }
+
+/* Rubric divider */
+.sec { display:flex; align-items:center; gap:12px; margin:var(--s-8) 0 var(--s-4);
+       font-size:var(--f-xs); font-weight:700; letter-spacing:var(--tk-widest);
+       text-transform:uppercase; color:var(--ink-4); }
+.sec::after { content:''; flex:1; height:1px; background:linear-gradient(90deg,var(--line),transparent); }
+.sec:first-child { margin-top:0; }
+
+.row { display:flex; gap:var(--s-2); flex-wrap:wrap; align-items:center; }
+.col { display:flex; flex-direction:column; }
+.spread { display:flex; align-items:center; justify-content:space-between; gap:var(--s-4); }
+.push { margin-left:auto; }
+.g2 { display:grid; grid-template-columns:1fr 1fr; gap:var(--s-4); }
+.g3 { display:grid; grid-template-columns:repeat(3,1fr); gap:var(--s-4); }
+
+/* ── LAYER 5 · DOMAIN COMPONENTS ────────────────────────────────────── */
+
+/* Masthead */
+.masthead { display:flex; align-items:flex-start; justify-content:space-between; gap:var(--s-6); margin-bottom:var(--s-8); }
+.eyebrow {
+  display:inline-flex; align-items:center; gap:8px; margin-bottom:8px;
+  font-size:var(--f-xs); font-weight:700; letter-spacing:var(--tk-wide);
+  text-transform:uppercase; color:var(--lumen);
+}
+.eyebrow::before {
+  content:''; width:5px; height:5px; border-radius:50%; background:var(--lumen);
+  box-shadow:0 0 9px var(--lumen); animation:beacon 2.4s var(--e-glide) infinite;
+}
+@keyframes beacon { 0%,100% { opacity:1; transform:scale(1); } 50% { opacity:.35; transform:scale(.62); } }
+.eyebrow.aurum { color:var(--aurum); }
+.eyebrow.aurum::before { background:var(--aurum); box-shadow:0 0 9px var(--aurum); }
+
+.title { font-size:var(--f-2xl); font-weight:800; letter-spacing:var(--tk-tight); line-height:1.08; }
+.dek   { font-size:var(--f-sm); color:var(--ink-3); margin-top:9px; max-width:56ch; line-height:1.62; }
+
+/* Metric deck */
+.deck { display:grid; grid-template-columns:repeat(4,1fr); gap:var(--s-3); margin-bottom:var(--s-6); }
+.metric {
+  position:relative; overflow:hidden; padding:var(--s-5);
+  background:var(--glass-1); border:1px solid var(--line); border-radius:var(--r-lg);
+  transition:transform var(--d-base) var(--e-swift), border-color var(--d-base) var(--e-swift), box-shadow var(--d-base) var(--e-swift);
+}
+.metric::before {
+  content:''; position:absolute; inset:0; opacity:0; pointer-events:none;
+  background:radial-gradient(420px circle at var(--px,50%) var(--py,0%), rgba(91,127,255,.09), transparent 62%);
+  transition:opacity var(--d-base) var(--e-swift);
+}
+.metric:hover { transform:translateY(-3px); border-color:var(--line-hi); box-shadow:var(--lift-2); }
+.metric:hover::before { opacity:1; }
+.metric-k { font-size:var(--f-xs); font-weight:600; letter-spacing:var(--tk-wide); text-transform:uppercase; color:var(--ink-4); margin-bottom:var(--s-3); }
+.metric-v { font-size:38px; font-weight:900; letter-spacing:-0.045em; line-height:.95; font-variant-numeric:tabular-nums; }
+.metric-v.lumen { color:var(--lumen); } .metric-v.ok { color:var(--ok); }
+.metric-v.warn  { color:var(--warn); }  .metric-v.crit { color:var(--crit); }
+.metric-v.aurum { color:var(--aurum); }
+.metric-d { font-size:var(--f-xs); color:var(--ink-4); margin-top:7px; }
+.metric-spark { position:absolute; right:0; bottom:0; width:96px; height:34px; opacity:.5; pointer-events:none; }
+
+/* Readiness arc */
+.arc-wrap { display:flex; align-items:center; gap:var(--s-6); }
+.arc { width:132px; height:132px; flex-shrink:0; }
+.arc-read { flex:1; min-width:0; }
+.arc-pct { font-size:var(--f-2xl); font-weight:900; letter-spacing:var(--tk-tight); color:var(--ok); line-height:1; font-variant-numeric:tabular-nums; }
+.arc-cap { font-size:var(--f-xs); color:var(--ink-4); margin-top:6px; line-height:1.6; }
+
+/* Ledger feed */
+.feed-i { display:flex; gap:12px; padding:11px 0; border-bottom:1px solid var(--line);
+          transition:padding-left var(--d-fast) var(--e-swift); }
+.feed-i:last-child { border-bottom:none; }
+.feed-i:hover { padding-left:5px; }
+.dot { width:7px; height:7px; border-radius:50%; margin-top:7px; flex-shrink:0; }
+.dot.ok{background:var(--ok);box-shadow:0 0 7px var(--ok);} .dot.warn{background:var(--warn);box-shadow:0 0 7px var(--warn);}
+.dot.crit{background:var(--crit);box-shadow:0 0 7px var(--crit);} .dot.lumen{background:var(--lumen);box-shadow:0 0 7px var(--lumen);}
+.dot.aurum{background:var(--aurum);box-shadow:0 0 7px var(--aurum);}
+.feed-t { font-size:var(--f-sm); color:var(--ink-2); line-height:1.5; }
+.feed-s { font-size:var(--f-xs); color:var(--ink-4); margin-top:2px; }
+
+/* Role ledger */
+.role {
+  position:relative; overflow:hidden; display:grid; grid-template-columns:1fr auto;
+  gap:var(--s-4); align-items:center; padding:var(--s-4) var(--s-5); margin-bottom:10px;
+  background:var(--glass-1); border:1px solid var(--line); border-radius:var(--r-lg);
+  transition:transform var(--d-base) var(--e-swift), border-color var(--d-base) var(--e-swift);
+}
+.role::before { content:''; position:absolute; left:0; top:0; bottom:0; width:3px; border-radius:0 2px 2px 0; }
+.role.s-active::before  { background:var(--ok); }
+.role.s-pending::before { background:var(--warn); }
+.role.s-ready::before   { background:var(--high); }
+.role.s-pr::before      { background:var(--lumen); }
+.role:hover { transform:translateX(4px); border-color:var(--line-hi); }
+.role-n { font-size:13px; font-weight:600; color:var(--ink); font-family:"SF Mono","JetBrains Mono",ui-monospace,monospace; }
+.role-r { font-size:var(--f-xs); color:var(--ink-4); margin-top:3px; }
+.role-right { display:flex; align-items:center; gap:var(--s-3); }
+.ring { width:44px; height:44px; flex-shrink:0; }
+.role-meta { text-align:right; }
+.cd { font-size:var(--f-xs); color:var(--ink-4); margin-top:4px; }
+.cd b { color:var(--warn); font-variant-numeric:tabular-nums; }
+
+/* Threat stream */
+.threat {
+  padding:var(--s-5); margin-bottom:10px;
+  background:var(--glass-1); border:1px solid var(--line); border-left:3px solid transparent;
+  border-radius:var(--r-lg);
+  transition:transform var(--d-base) var(--e-swift), border-color var(--d-base) var(--e-swift), box-shadow var(--d-base) var(--e-swift);
+}
+.threat:hover { transform:translateX(4px); border-color:var(--line-hi); box-shadow:var(--lift-2); }
+.threat.critical { border-left-color:var(--crit); }
+.threat.high     { border-left-color:var(--high); }
+.threat.medium   { border-left-color:var(--warn); }
+.threat.low      { border-left-color:var(--ok); }
+.threat-top { display:flex; justify-content:space-between; align-items:flex-start; gap:var(--s-3); margin-bottom:8px; }
+.threat-h   { font-size:var(--f-md); font-weight:700; letter-spacing:var(--tk-snug); line-height:1.35; }
+.threat-src { font-size:9px; font-weight:700; letter-spacing:var(--tk-wide); text-transform:uppercase; color:var(--ink-4); margin-bottom:5px; }
+.threat-m   { display:flex; gap:9px; flex-wrap:wrap; font-size:var(--f-xs); color:var(--ink-4); margin-bottom:7px; }
+.threat-c   { font-size:var(--f-xs); font-weight:600; letter-spacing:.04em; color:var(--lumen); margin-bottom:10px; }
+.threat-d   { font-size:var(--f-sm); color:var(--ink-2); line-height:1.68; margin-bottom:12px; }
+.mit { list-style:none; margin-bottom:14px; }
+.mit li { position:relative; padding:3px 0 3px 19px; font-size:12px; color:var(--ink-3); line-height:1.55; }
+.mit li::before { content:'→'; position:absolute; left:0; color:var(--lumen); font-size:11px; }
+.threat-act { display:flex; gap:8px; flex-wrap:wrap; align-items:center; padding-top:13px; border-top:1px solid var(--line); }
+/* Per-threat monetized value tag */
+.threat-val { font-size:var(--f-xs); font-weight:700; color:var(--aurum); letter-spacing:.02em; }
+
+/* Evidence vault */
+.ev {
+  display:grid; grid-template-columns:auto 1fr auto; gap:var(--s-4); align-items:center;
+  padding:var(--s-5); margin-bottom:10px;
+  background:var(--glass-1); border:1px solid var(--line); border-radius:var(--r-lg);
+  transition:transform var(--d-base) var(--e-swift), border-color var(--d-base) var(--e-swift), box-shadow var(--d-base) var(--e-swift);
+}
+.ev:hover { transform:translateY(-2px); border-color:var(--line-hi); box-shadow:var(--lift-2); }
+.ev-seal { width:40px; height:40px; flex-shrink:0; }
+.ev-n { font-size:var(--f-md); font-weight:700; letter-spacing:var(--tk-snug); }
+.ev-m { display:flex; gap:11px; flex-wrap:wrap; font-size:var(--f-xs); color:var(--ink-4); margin-top:4px; align-items:center; }
+.sha { font-family:"SF Mono",ui-monospace,monospace; font-size:11px; color:var(--lumen);
+       background:var(--glass-2); border:1px solid var(--line); border-radius:var(--r-xs); padding:2px 8px; }
+/* Locked (paywalled) vault row */
+.ev.locked { border-style:dashed; border-color:var(--line-aurum); background:var(--aurum-wash); }
+.ev.locked .ev-n { color:var(--ink-2); }
+
+/* Segmented control */
+.seg { display:flex; gap:4px; padding:4px; margin-bottom:var(--s-5);
+       background:var(--glass-sunk); border:1px solid var(--line); border-radius:var(--r-lg); }
+.seg-b { flex:1; font-family:inherit; font-size:var(--f-sm); font-weight:500; color:var(--ink-3);
+         background:transparent; border:none; padding:9px 12px; border-radius:var(--r-md); cursor:pointer;
+         transition:color var(--d-fast) var(--e-swift), background var(--d-fast) var(--e-swift); }
+.seg-b:hover:not(.on) { color:var(--ink); background:var(--glass-2); }
+.seg-b.on { background:linear-gradient(135deg,var(--lumen),var(--lumen-2)); color:#fff; box-shadow:0 2px 16px var(--lumen-halo); }
+
+/* Drop target */
+.drop {
+  position:relative; overflow:hidden; text-align:center; cursor:pointer;
+  padding:var(--s-10) var(--s-6); margin:var(--s-2) 0;
+  color:var(--ink-3); background:var(--glass-sunk);
+  border:1px dashed rgba(255,255,255,.11); border-radius:var(--r-xl);
+  transition:border-color var(--d-base) var(--e-swift), background var(--d-base) var(--e-swift), color var(--d-base), transform var(--d-base) var(--e-swift);
+}
+.drop:hover, .drop.over { border-color:var(--lumen); background:var(--lumen-wash); color:var(--ink); }
+.drop.over { transform:scale(1.012); }
+.drop-ic { display:block; width:38px; height:38px; margin:0 auto var(--s-3); transition:transform var(--d-slow) var(--e-spring); }
+.drop:hover .drop-ic { transform:translateY(-6px); }
+.drop p { font-size:var(--f-sm); }
+.drop small { display:block; margin-top:6px; font-size:var(--f-xs); color:var(--ink-4); }
+
+/* Status line */
+.status { min-height:22px; margin-top:var(--s-2); font-size:var(--f-sm); color:var(--ink-4);
+          display:flex; align-items:center; gap:8px; transition:color var(--d-fast); }
+.status.err { color:var(--crit); } .status.ok { color:var(--ok); }
+
+/* Skeleton + spinner */
+.skel { background:linear-gradient(90deg,var(--glass-1) 24%,var(--glass-2) 50%,var(--glass-1) 76%);
+        background-size:220% 100%; animation:shimmer 1.5s linear infinite; border-radius:var(--r-md); }
+@keyframes shimmer { from { background-position:220% 0; } to { background-position:-220% 0; } }
+.spin { width:15px; height:15px; flex-shrink:0; border:2px solid rgba(255,255,255,.10);
+        border-top-color:var(--lumen); border-radius:50%; animation:spin .68s linear infinite; }
+@keyframes spin { to { transform:rotate(360deg); } }
+
+/* Empty state */
+.empty { text-align:center; padding:var(--s-16) var(--s-6); color:var(--ink-4); }
+.empty svg { width:44px; height:44px; margin:0 auto var(--s-4); opacity:.42; display:block; }
+.empty h3 { font-size:var(--f-lg); font-weight:700; color:var(--ink-2); margin-bottom:8px; letter-spacing:var(--tk-snug); }
+.empty p  { font-size:var(--f-sm); max-width:38ch; margin:0 auto var(--s-5); line-height:1.7; }
+
+/* ── LAYER 6 · MONETIZATION SURFACES ────────────────────────────────── */
+/* Everything below is gold-tokened. Gold appears nowhere else in the product,
+   so the eye learns in one session: gold === money === upgrade. */
+
+/* Quota meter — persistent scarcity signal in the rail */
+.quota { margin:var(--s-4) 0 var(--s-2); padding:12px; border-radius:var(--r-md);
+         background:var(--glass-sunk); border:1px solid var(--line);
+         transition:border-color var(--d-base) var(--e-swift), background var(--d-base); }
+.quota.low  { border-color:var(--line-aurum); background:var(--aurum-wash); }
+.quota.zero { border-color:rgba(248,113,113,.30); background:var(--crit-wash); }
+.quota-top { display:flex; justify-content:space-between; align-items:baseline; margin-bottom:8px; }
+.quota-k { font-size:9px; font-weight:700; letter-spacing:var(--tk-widest); text-transform:uppercase; color:var(--ink-4); }
+.quota-v { font-size:11px; font-weight:800; color:var(--ink-2); font-variant-numeric:tabular-nums; }
+.quota.low .quota-v { color:var(--aurum); } .quota.zero .quota-v { color:var(--crit); }
+.quota-track { height:4px; border-radius:var(--r-full); background:rgba(255,255,255,.07); overflow:hidden; }
+.quota-fill  { height:100%; width:0%; border-radius:var(--r-full);
+               background:linear-gradient(90deg,var(--lumen),var(--lumen-2));
+               transition:width var(--d-epic) var(--e-decel), background var(--d-slow); }
+.quota.low  .quota-fill { background:linear-gradient(90deg,var(--aurum),var(--aurum-2)); }
+.quota.zero .quota-fill { background:linear-gradient(90deg,var(--crit),#DC2626); }
+.quota-cta { margin-top:10px; width:100%; font-size:11px; padding:7px 10px; }
+
+/* Value meter — the ROI counter. Converts usage into a dollar number so the
+   upgrade decision is framed against savings already realised, not against price. */
+.value-meter { position:relative; overflow:hidden; padding:var(--s-5) var(--s-6);
+               border:1px solid var(--line-aurum); border-radius:var(--r-xl);
+               background:linear-gradient(135deg, rgba(245,200,107,.075), rgba(245,200,107,.018));
+               backdrop-filter:var(--blur-sm); -webkit-backdrop-filter:var(--blur-sm); }
+.value-meter::after { content:''; position:absolute; top:0; left:10%; right:10%; height:1px;
+                      background:linear-gradient(90deg,transparent,var(--aurum-halo),transparent); }
+.value-k { font-size:var(--f-xs); font-weight:700; letter-spacing:var(--tk-wide); text-transform:uppercase; color:var(--aurum); margin-bottom:10px; }
+.value-v { font-size:var(--f-3xl); font-weight:900; letter-spacing:var(--tk-tight); line-height:.94;
+           color:var(--aurum); font-variant-numeric:tabular-nums; }
+.value-d { font-size:var(--f-xs); color:var(--ink-3); margin-top:9px; line-height:1.6; max-width:46ch; }
+
+/* Paywall — blurred content behind a gold gate. Shows the shape of the value
+   without giving it away; strictly higher converting than an empty lock screen. */
+.gate { position:relative; border-radius:var(--r-xl); overflow:hidden; }
+.gate-veil { filter:blur(7px) saturate(.55); opacity:.42; pointer-events:none; user-select:none; }
+.gate-panel {
+  position:absolute; inset:0; display:grid; place-items:center; text-align:center; padding:var(--s-6);
+  background:radial-gradient(ellipse 80% 70% at 50% 50%, rgba(5,6,10,.86), rgba(5,6,10,.97));
+  backdrop-filter:var(--blur-xs); -webkit-backdrop-filter:var(--blur-xs);
+}
+.gate-in { max-width:44ch; animation:gate-rise var(--d-slow) var(--e-expo) both; }
+@keyframes gate-rise { from { opacity:0; transform:translate3d(0,14px,0) scale(.98); } to { opacity:1; transform:none; } }
+.gate-ic { width:38px; height:38px; margin:0 auto var(--s-4); display:block; }
+.gate-h  { font-size:var(--f-xl); font-weight:800; letter-spacing:var(--tk-tight); margin-bottom:9px; }
+.gate-p  { font-size:var(--f-sm); color:var(--ink-3); line-height:1.68; margin-bottom:var(--s-5); }
+.gate-p b { color:var(--aurum); font-weight:700; }
+
+/* Pricing modal */
+.scrim { position:fixed; inset:0; z-index:400; display:none;
+         background:var(--scrim); backdrop-filter:var(--blur-sm); -webkit-backdrop-filter:var(--blur-sm); }
+.scrim.on { display:grid; place-items:center; padding:var(--s-6);
+            animation:fade var(--d-base) var(--e-swift) both; }
+@keyframes fade { from { opacity:0; } to { opacity:1; } }
+
+.modal { position:relative; width:min(1020px,100%); max-height:88vh; overflow-y:auto;
+         background:linear-gradient(180deg,var(--bg-3),var(--bg-2));
+         border:1px solid var(--line-hi); border-radius:var(--r-xl); box-shadow:var(--lift-3);
+         padding:var(--s-10) var(--s-8) var(--s-8);
+         animation:modal-in var(--d-slow) var(--e-expo) both; }
+@keyframes modal-in { from { opacity:0; transform:translate3d(0,26px,0) scale(.965); } to { opacity:1; transform:none; } }
+.modal-x { position:absolute; top:16px; right:16px; width:32px; height:32px; padding:0;
+           display:grid; place-items:center; border-radius:var(--r-sm);
+           background:var(--glass-2); border:1px solid var(--line); color:var(--ink-2); cursor:pointer;
+           transition:background var(--d-fast), color var(--d-fast), transform var(--d-fast) var(--e-spring); }
+.modal-x:hover { background:var(--glass-3); color:var(--ink); transform:rotate(90deg); }
+.modal-head { text-align:center; margin-bottom:var(--s-8); }
+.modal-h { font-size:var(--f-2xl); font-weight:800; letter-spacing:var(--tk-tight); line-height:1.1; }
+.modal-d { font-size:var(--f-sm); color:var(--ink-3); margin-top:10px; }
+
+/* Billing toggle */
+.cycle { display:inline-flex; gap:3px; padding:3px; margin-top:var(--s-5);
+         background:var(--glass-sunk); border:1px solid var(--line); border-radius:var(--r-full); }
+.cycle-b { font-family:inherit; font-size:12px; font-weight:600; color:var(--ink-3);
+           padding:6px 16px; border:none; border-radius:var(--r-full); background:transparent; cursor:pointer;
+           transition:background var(--d-fast) var(--e-swift), color var(--d-fast); }
+.cycle-b.on { background:var(--glass-3); color:var(--ink); }
+.cycle-save { font-size:9px; font-weight:800; color:var(--aurum); margin-left:5px; letter-spacing:.05em; }
+
+/* Plan grid */
+.plans { display:grid; grid-template-columns:repeat(3,1fr); gap:var(--s-4); align-items:stretch; }
+.plan { position:relative; display:flex; flex-direction:column; padding:var(--s-6);
+        background:var(--glass-1); border:1px solid var(--line); border-radius:var(--r-lg);
+        transition:transform var(--d-base) var(--e-swift), border-color var(--d-base), box-shadow var(--d-base); }
+.plan:hover { transform:translateY(-4px); border-color:var(--line-hi); box-shadow:var(--lift-2); }
+/* Anchor tier — visually dominant, defines the reference price */
+.plan--anchor { border-color:var(--line-aurum);
+                background:linear-gradient(180deg, rgba(245,200,107,.055), var(--glass-1));
+                transform:scale(1.028); box-shadow:0 0 0 1px var(--aurum-wash), var(--lift-2); }
+.plan--anchor:hover { transform:scale(1.028) translateY(-4px); }
+.plan-flag { position:absolute; top:-11px; left:50%; transform:translateX(-50%);
+             font-size:9px; font-weight:800; letter-spacing:var(--tk-wide); text-transform:uppercase;
+             padding:4px 12px; border-radius:var(--r-full); white-space:nowrap;
+             background:linear-gradient(135deg,var(--aurum),var(--aurum-2)); color:var(--aurum-ink);
+             box-shadow:0 3px 14px var(--aurum-halo); }
+.plan-n { font-size:var(--f-md); font-weight:700; letter-spacing:var(--tk-snug); }
+.plan-for { font-size:var(--f-xs); color:var(--ink-4); margin-top:4px; min-height:32px; line-height:1.5; }
+.plan-price { display:flex; align-items:baseline; gap:4px; margin:var(--s-4) 0 3px; }
+.plan-cur { font-size:var(--f-md); font-weight:700; color:var(--ink-2); }
+.plan-amt { font-size:var(--f-3xl); font-weight:900; letter-spacing:var(--tk-tight); line-height:1; font-variant-numeric:tabular-nums; }
+.plan--anchor .plan-amt { color:var(--aurum); }
+.plan-per { font-size:var(--f-xs); color:var(--ink-4); }
+.plan-note { font-size:var(--f-xs); color:var(--ink-4); min-height:18px; }
+.plan-feats { list-style:none; margin:var(--s-5) 0; flex:1; }
+.plan-feats li { position:relative; padding:6px 0 6px 22px; font-size:12.5px; color:var(--ink-2); line-height:1.5; }
+.plan-feats li::before { content:''; position:absolute; left:0; top:11px; width:11px; height:11px;
+  background:no-repeat center/contain url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M1.5 6.4l3 3 6-7' fill='none' stroke='%2334D399' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); }
+.plan--anchor .plan-feats li::before { filter:hue-rotate(-95deg) saturate(1.5) brightness(1.15); }
+.modal-foot { margin-top:var(--s-6); padding-top:var(--s-5); border-top:1px solid var(--line);
+              display:flex; justify-content:center; gap:var(--s-6); flex-wrap:wrap;
+              font-size:var(--f-xs); color:var(--ink-4); }
+.trust { display:flex; align-items:center; gap:6px; }
+.trust svg { width:13px; height:13px; opacity:.6; }
+
+/* Command palette */
+.cmdk { position:fixed; inset:0; z-index:500; display:none; padding-top:14vh; justify-content:center;
+        background:var(--scrim); backdrop-filter:var(--blur-sm); -webkit-backdrop-filter:var(--blur-sm); }
+.cmdk.on { display:flex; animation:fade var(--d-fast) var(--e-swift) both; }
+.cmdk-box { width:min(620px,92vw); height:fit-content; max-height:64vh; display:flex; flex-direction:column;
+            background:linear-gradient(180deg,var(--bg-3),var(--bg-2));
+            border:1px solid var(--line-hi); border-radius:var(--r-lg); box-shadow:var(--lift-3);
+            overflow:hidden; animation:modal-in var(--d-base) var(--e-expo) both; }
+.cmdk-in { border:none; background:transparent; border-bottom:1px solid var(--line);
+           border-radius:0; margin:0; padding:16px 18px; font-size:var(--f-md); }
+.cmdk-in:focus { box-shadow:none; background:transparent; border-color:var(--line); }
+.cmdk-list { overflow-y:auto; padding:8px; }
+.cmdk-i { display:flex; align-items:center; gap:11px; padding:10px 12px; border-radius:var(--r-md);
+          font-size:var(--f-sm); color:var(--ink-2); cursor:pointer; }
+.cmdk-i[aria-selected="true"] { background:var(--lumen-wash); color:var(--ink); }
+.cmdk-i.aurum[aria-selected="true"] { background:var(--aurum-wash); }
+.cmdk-i .ic { width:15px; height:15px; opacity:.6; flex-shrink:0; }
+.cmdk-hint { margin-left:auto; font-size:10px; color:var(--ink-4); font-family:ui-monospace,monospace; }
+.kbd { display:inline-block; padding:2px 6px; font-size:10px; font-family:ui-monospace,monospace;
+       color:var(--ink-3); background:var(--glass-2); border:1px solid var(--line);
+       border-bottom-width:2px; border-radius:var(--r-xs); }
+
+/* Toast rail */
+.toasts { position:fixed; bottom:26px; right:26px; z-index:600; display:flex; flex-direction:column-reverse; gap:10px; pointer-events:none; }
+.toast { display:flex; align-items:center; gap:11px; max-width:380px; pointer-events:auto;
+         padding:13px 17px; font-size:var(--f-sm); color:var(--ink);
+         background:linear-gradient(180deg,var(--bg-3),var(--bg-2));
+         border:1px solid var(--line-hi); border-radius:var(--r-md); box-shadow:var(--lift-3);
+         animation:toast-in var(--d-slow) var(--e-spring) both; }
+.toast.out { animation:toast-out var(--d-base) var(--e-swift) both; }
+.toast.aurum { border-color:var(--line-aurum); }
+@keyframes toast-in  { from { opacity:0; transform:translate3d(0,18px,0) scale(.95); } to { opacity:1; transform:none; } }
+@keyframes toast-out { to { opacity:0; transform:translate3d(26px,0,0) scale(.96); } }
+.toast-dot { width:7px; height:7px; border-radius:50%; flex-shrink:0; }
+
+/* ── LAYER 7 · MOTION LIBRARY ───────────────────────────────────────── */
+/* Staggered entrance: the parent sets --i on each child; one animation, no timers. */
+.stagger > * {
+  opacity:0;
+  animation:rise var(--d-slow) var(--e-expo) both;
+  animation-delay:calc(var(--i,0) * var(--stagger));
+}
+@keyframes rise { from { opacity:0; transform:translate3d(0,14px,0); } to { opacity:1; transform:none; } }
+
+.stagger--x > * { animation-name:rise-x; }
+@keyframes rise-x { from { opacity:0; transform:translate3d(-12px,0,0); } to { opacity:1; transform:none; } }
+
+/* Reveal-on-scroll — IntersectionObserver toggles .seen */
+.reveal { opacity:0; transform:translate3d(0,22px,0);
+          transition:opacity var(--d-cine) var(--e-expo), transform var(--d-cine) var(--e-expo); }
+.reveal.seen { opacity:1; transform:none; }
+
+/* Magnetic — JS writes the offset into custom props; CSS owns the transform.
+   Keeps :active scale composable with the magnet translation. */
+.magnetic { transform:translate3d(var(--mx,0px), var(--my,0px), 0); }
+
+/* Numeric roll for counters */
+.roll { display:inline-block; font-variant-numeric:tabular-nums; }
+
+/* ── LAYER 8 · ADAPTIVE + A11Y ──────────────────────────────────────── */
+@media (max-width:1180px) {
+  .deck { grid-template-columns:repeat(2,1fr); }
+  .plans { grid-template-columns:1fr; }
+  .plan--anchor { transform:none; } .plan--anchor:hover { transform:translateY(-4px); }
+}
+@media (max-width:900px) {
+  :root { --f-2xl:26px; --f-3xl:34px; }
+  .shell { grid-template-columns:1fr; }
+  .rail { position:fixed; left:0; top:0; width:var(--rail-w);
+          transform:translate3d(-100%,0,0); transition:transform var(--d-slow) var(--e-expo); box-shadow:var(--lift-3); }
+  .rail.open { transform:none; }
+  .stage { padding:76px var(--s-4) 72px; }
+  .burger { display:grid !important; }
+  .g2,.g3 { grid-template-columns:1fr; }
+  .masthead { flex-direction:column; align-items:stretch; }
+  .arc-wrap { flex-direction:column; align-items:flex-start; gap:var(--s-4); }
+  .toasts { left:16px; right:16px; bottom:16px; }
+  .toast { max-width:none; }
+}
+@media (max-width:560px) {
+  .deck { grid-template-columns:1fr; }
+  .ev { grid-template-columns:1fr; }
+}
+
+.burger { display:none; position:fixed; top:14px; left:14px; z-index:30; width:40px; height:40px;
+          place-items:center; border-radius:var(--r-md); cursor:pointer;
+          background:rgba(8,10,17,.86); border:1px solid var(--line); color:var(--ink);
+          backdrop-filter:var(--blur-sm); -webkit-backdrop-filter:var(--blur-sm); }
+
+/* Honour the OS. Kill decorative motion; keep opacity so nothing is invisible. */
+@media (prefers-reduced-motion:reduce) {
+  *,*::before,*::after {
+    animation-duration:1ms !important; animation-iteration-count:1 !important;
+    transition-duration:1ms !important; scroll-behavior:auto !important;
+  }
+  .reveal { opacity:1; transform:none; }
+  .stagger > * { opacity:1; }
+  .orb { animation:none; }
+}
+
+@media print {
+  .rail,.field,.weave,.vignette,.toasts,.burger,.scrim,.cmdk { display:none !important; }
+  body { background:#fff; color:#000; }
+  .stage { padding:0; }
+}
+</style>
 </head>
 <body>
 
-<!-- Ambient -->
-<div class="ambient">
-  <div class="orb orb-1"></div>
-  <div class="orb orb-2"></div>
-  <div class="orb orb-3"></div>
+<!-- ══ AMBIENT FIELD ══════════════════════════════════════════════════ -->
+<div class="field" aria-hidden="true">
+  <canvas id="mesh"></canvas>
+  <div class="orb orb-a"></div>
+  <div class="orb orb-b"></div>
+  <div class="orb orb-c"></div>
 </div>
-<div class="dot-grid"></div>
+<div class="weave"   aria-hidden="true"></div>
+<div class="vignette" aria-hidden="true"></div>
+
+<button class="burger" id="burger" aria-label="Open navigation" aria-expanded="false">
+  <svg width="17" height="17" viewBox="0 0 17 17" fill="none" aria-hidden="true">
+    <path d="M2 4.5h13M2 8.5h13M2 12.5h13" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+  </svg>
+</button>
 
 <div class="shell">
 
-  <!-- ── SIDEBAR ─────────────────────────────────────────────────── -->
-  <nav class="nav">
-    <div class="nav-logo">
-      <!-- Signature element: SVG hexagon mark rendered inline -->
-      <svg class="logo-hex" viewBox="0 0 34 34" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- ══ KINETIC RAIL ═════════════════════════════════════════════════ -->
+  <nav class="rail" id="rail" aria-label="Primary">
+    <div class="brand">
+      <svg class="brand-mark" viewBox="0 0 36 36" fill="none" aria-hidden="true">
         <defs>
-          <linearGradient id="hg" x1="0%" y1="0%" x2="100%" y2="100%">
-            <stop offset="0%" stop-color="#5b7fff"/>
-            <stop offset="100%" stop-color="#8b5cf6"/>
+          <linearGradient id="lum" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%"  stop-color="#5B7FFF"/>
+            <stop offset="55%" stop-color="#8B5CF6"/>
+            <stop offset="100%" stop-color="#06B6D4"/>
           </linearGradient>
-          <filter id="glow">
-            <feGaussianBlur stdDeviation="2" result="blur"/>
-            <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+          <filter id="soft" x="-50%" y="-50%" width="200%" height="200%">
+            <feGaussianBlur stdDeviation="1.8" result="b"/>
+            <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
           </filter>
         </defs>
-        <path d="M17 2L30 9.5V24.5L17 32L4 24.5V9.5L17 2Z"
-              fill="url(#hg)" opacity="0.15"/>
-        <path d="M17 2L30 9.5V24.5L17 32L4 24.5V9.5L17 2Z"
-              stroke="url(#hg)" stroke-width="1.2" filter="url(#glow)"/>
-        <path d="M17 8l7 4v8l-7 4-7-4v-8l7-4z"
-              fill="url(#hg)" opacity="0.7"/>
+        <path d="M18 2.4L31.5 10.2v15.6L18 33.6 4.5 25.8V10.2L18 2.4Z" fill="url(#lum)" opacity=".13"/>
+        <path d="M18 2.4L31.5 10.2v15.6L18 33.6 4.5 25.8V10.2L18 2.4Z" stroke="url(#lum)" stroke-width="1.15" filter="url(#soft)"/>
+        <path d="M18 8.8l7.4 4.3v8.4L18 25.8l-7.4-4.3v-8.4L18 8.8Z" fill="url(#lum)" opacity=".62"/>
+        <circle cx="18" cy="17.3" r="2.5" fill="#05060A"/>
+        <circle cx="18" cy="17.3" r="1.15" fill="url(#lum)"/>
       </svg>
-      <div class="logo-text">
-        <div class="logo-name">ACE</div>
-        <div class="logo-sub">Cybersecurity Engine</div>
+      <div>
+        <div class="brand-name">ACE</div>
+        <div class="brand-sub">Cybersecurity Engine</div>
       </div>
     </div>
 
-    <div class="nav-section">Workspace</div>
+    <div class="nav-scroll">
+      <div class="rubric">Workspace</div>
 
-    <div class="nav-item active" data-page="overview">
-      <svg class="nav-icon" viewBox="0 0 15 15" fill="none">
-        <rect x="1" y="1" width="5.5" height="5.5" rx="1" stroke="currentColor" stroke-width="1.2"/>
-        <rect x="8.5" y="1" width="5.5" height="5.5" rx="1" stroke="currentColor" stroke-width="1.2"/>
-        <rect x="1" y="8.5" width="5.5" height="5.5" rx="1" stroke="currentColor" stroke-width="1.2"/>
-        <rect x="8.5" y="8.5" width="5.5" height="5.5" rx="1" stroke="currentColor" stroke-width="1.2"/>
-      </svg>
-      Overview
+      <div class="nav-i on" data-view="overview" role="button" tabindex="0" aria-current="page">
+        <svg class="ic" viewBox="0 0 15 15" fill="none" aria-hidden="true">
+          <rect x="1" y="1" width="5.5" height="5.5" rx="1.2" stroke="currentColor" stroke-width="1.15"/>
+          <rect x="8.5" y="1" width="5.5" height="5.5" rx="1.2" stroke="currentColor" stroke-width="1.15"/>
+          <rect x="1" y="8.5" width="5.5" height="5.5" rx="1.2" stroke="currentColor" stroke-width="1.15"/>
+          <rect x="8.5" y="8.5" width="5.5" height="5.5" rx="1.2" stroke="currentColor" stroke-width="1.15"/>
+        </svg>
+        Overview
+      </div>
+
+      <div class="nav-i" data-view="roles" role="button" tabindex="0">
+        <svg class="ic" viewBox="0 0 15 15" fill="none" aria-hidden="true">
+          <circle cx="7.5" cy="4.8" r="2.6" stroke="currentColor" stroke-width="1.15"/>
+          <path d="M2.2 13.2c0-3 2.4-4.6 5.3-4.6s5.3 1.6 5.3 4.6" stroke="currentColor" stroke-width="1.15" stroke-linecap="round"/>
+        </svg>
+        IAM Roles
+        <span class="tag" id="tag-roles" hidden>0</span>
+      </div>
+
+      <div class="nav-i" data-view="threats" role="button" tabindex="0">
+        <svg class="ic" viewBox="0 0 15 15" fill="none" aria-hidden="true">
+          <path d="M7.5 1.2 13 4.4v6.2L7.5 13.8 2 10.6V4.4L7.5 1.2Z" stroke="currentColor" stroke-width="1.15" stroke-linejoin="round"/>
+          <path d="M7.5 5v3.4" stroke="currentColor" stroke-width="1.15" stroke-linecap="round"/>
+          <circle cx="7.5" cy="10.4" r=".72" fill="currentColor"/>
+        </svg>
+        Threats
+        <span class="tag" id="tag-threats" hidden>0</span>
+      </div>
+
+      <div class="nav-i" data-view="generate" role="button" tabindex="0">
+        <svg class="ic" viewBox="0 0 15 15" fill="none" aria-hidden="true">
+          <path d="M7.5 1.4v12.2M1.4 7.5h12.2" stroke="currentColor" stroke-width="1.15" stroke-linecap="round"/>
+        </svg>
+        New Analysis
+      </div>
+
+      <div class="rubric">Compliance</div>
+
+      <div class="nav-i" data-view="evidence" role="button" tabindex="0">
+        <svg class="ic" viewBox="0 0 15 15" fill="none" aria-hidden="true">
+          <rect x="2.2" y="1.2" width="10.6" height="12.6" rx="1.6" stroke="currentColor" stroke-width="1.15"/>
+          <path d="M5 5h5M5 7.6h5M5 10.2h3" stroke="currentColor" stroke-width="1.15" stroke-linecap="round"/>
+        </svg>
+        Evidence Vault
+      </div>
+
+      <div class="nav-i" data-view="pricing" role="button" tabindex="0">
+        <svg class="ic" viewBox="0 0 15 15" fill="none" aria-hidden="true">
+          <path d="M7.5 1.3 9.4 5.4l4.3.5-3.2 3 .9 4.3-3.9-2.2-3.9 2.2.9-4.3-3.2-3 4.3-.5L7.5 1.3Z"
+                stroke="currentColor" stroke-width="1.15" stroke-linejoin="round"/>
+        </svg>
+        Plans
+        <span class="tag aurum" id="tag-plan">Free</span>
+      </div>
     </div>
 
-    <div class="nav-item" data-page="roles">
-      <svg class="nav-icon" viewBox="0 0 15 15" fill="none">
-        <circle cx="7.5" cy="5" r="2.5" stroke="currentColor" stroke-width="1.2"/>
-        <path d="M2 13c0-3 2.5-4.5 5.5-4.5S13 10 13 13" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
-      </svg>
-      IAM Roles
-      <span class="nav-pill" id="nav-role-count" style="display:none">0</span>
+    <!-- Quota meter: persistent, honest scarcity -->
+    <div class="quota" id="quota" role="status" aria-live="polite">
+      <div class="quota-top">
+        <span class="quota-k">Monthly scans</span>
+        <span class="quota-v" id="quota-v">— / —</span>
+      </div>
+      <div class="quota-track"><div class="quota-fill" id="quota-fill"></div></div>
+      <button class="btn btn--aurum quota-cta magnetic" id="quota-cta" data-cta="rail-quota" hidden>
+        Unlock unlimited
+      </button>
     </div>
 
-    <div class="nav-item" data-page="threats">
-      <svg class="nav-icon" viewBox="0 0 15 15" fill="none">
-        <path d="M7.5 1L13 4.5v6L7.5 14 2 10.5v-6L7.5 1z" stroke="currentColor" stroke-width="1.2"/>
-        <line x1="7.5" y1="5" x2="7.5" y2="8.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
-        <circle cx="7.5" cy="10.5" r="0.7" fill="currentColor"/>
-      </svg>
-      Threats
-    </div>
-
-    <div class="nav-item" data-page="generate">
-      <svg class="nav-icon" viewBox="0 0 15 15" fill="none">
-        <path d="M7.5 1v13M1 7.5h13" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
-      </svg>
-      New Analysis
-    </div>
-
-    <div class="nav-section">Compliance</div>
-
-    <div class="nav-item" data-page="evidence">
-      <svg class="nav-icon" viewBox="0 0 15 15" fill="none">
-        <rect x="2" y="1" width="11" height="13" rx="1.5" stroke="currentColor" stroke-width="1.2"/>
-        <line x1="5" y1="5" x2="10" y2="5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
-        <line x1="5" y1="7.5" x2="10" y2="7.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
-        <line x1="5" y1="10" x2="8" y2="10" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
-      </svg>
-      Evidence PDFs
-    </div>
-
-    <div class="nav-bottom">
-      <div class="nav-user">
-        <div class="user-avatar" id="user-initial">?</div>
-        <div>
-          <div style="font-size:12px;color:var(--text-dim);font-weight:500" id="user-email">Not signed in</div>
-          <div style="font-size:10px;color:var(--text-muted);margin-top:1px" id="sign-toggle" style="cursor:pointer">Sign in</div>
+    <div class="rail-foot">
+      <div class="acct" id="acct" role="button" tabindex="0">
+        <div class="avatar" id="acct-initial">?</div>
+        <div style="min-width:0">
+          <div class="acct-mail" id="acct-mail">Not signed in</div>
+          <div class="acct-act" id="acct-act">Sign in with Google</div>
         </div>
       </div>
     </div>
   </nav>
 
-  <!-- ── MAIN ──────────────────────────────────────────────────────── -->
-  <main class="main">
+  <!-- ══ STAGE ════════════════════════════════════════════════════════ -->
+  <main class="stage" id="stage">
 
-    <!-- OVERVIEW PAGE -->
-    <div class="page active" id="page-overview">
-      <div class="page-head">
+    <!-- ── OVERVIEW ─────────────────────────────────────────────────── -->
+    <section class="view on" id="v-overview" aria-labelledby="h-overview">
+      <div class="masthead">
         <div>
-          <div class="page-eyebrow">Security Posture</div>
-          <h1 class="page-title">Overview</h1>
-          <p class="page-sub">Real-time view of your IAM threat surface and SOC2 readiness.</p>
+          <div class="eyebrow">Security Posture</div>
+          <h1 class="title" id="h-overview">Overview</h1>
+          <p class="dek">Live view of your IAM attack surface and SOC&nbsp;2 CC6.3 audit readiness. The sweeper runs continuously; you only act on exceptions.</p>
         </div>
-        <button class="primary" onclick="navigate('generate')">
-          <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
-            <path d="M6.5 1v11M1 6.5h11" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-          </svg>
-          New Analysis
-        </button>
+        <div class="row">
+          <button class="btn btn--ghost" id="btn-cmdk">
+            <svg width="13" height="13" viewBox="0 0 13 13" fill="none" aria-hidden="true">
+              <circle cx="5.6" cy="5.6" r="4.1" stroke="currentColor" stroke-width="1.3"/>
+              <path d="M8.7 8.7 11.8 11.8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
+            </svg>
+            Search <span class="kbd" style="margin-left:2px">⌘K</span>
+          </button>
+          <button class="btn btn--primary magnetic" data-go="generate">
+            <svg width="13" height="13" viewBox="0 0 13 13" fill="none" aria-hidden="true">
+              <path d="M6.5 1v11M1 6.5h11" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+            </svg>
+            New Analysis
+          </button>
+        </div>
       </div>
 
-      <div class="metric-grid" id="overview-metrics">
-        <div class="metric-card skeleton" style="height:96px"></div>
-        <div class="metric-card skeleton" style="height:96px"></div>
-        <div class="metric-card skeleton" style="height:96px"></div>
-        <div class="metric-card skeleton" style="height:96px"></div>
+      <!-- ROI value meter: revenue surface #1 -->
+      <div class="value-meter reveal" id="value-meter" style="margin-bottom:var(--s-6)">
+        <div class="value-k">Audit labour avoided — year to date</div>
+        <div class="value-v"><span class="roll" id="value-amount">$0</span></div>
+        <p class="value-d" id="value-note">Every automated reduction PR and sealed evidence package replaces manual audit preparation. Run your first analysis to start the counter.</p>
       </div>
 
-      <div class="grid-2">
-        <div class="card">
-          <div class="card-inner">
-            <div class="sec-label" style="margin-top:0">SOC2 Readiness</div>
-            <div class="readiness-wrap">
-              <div class="readiness-header">
-                <span class="readiness-label">CC6.3 Score</span>
-                <span class="readiness-pct" id="readiness-pct">—</span>
-              </div>
-              <div class="readiness-track">
-                <div class="readiness-fill" id="readiness-fill" style="width:0%"></div>
-              </div>
-              <p style="font-size:11px;color:var(--text-muted);margin-top:10px" id="readiness-sub"></p>
+      <div class="deck" id="deck">
+        <div class="metric skel" style="height:132px"></div>
+        <div class="metric skel" style="height:132px"></div>
+        <div class="metric skel" style="height:132px"></div>
+        <div class="metric skel" style="height:132px"></div>
+      </div>
+
+      <div class="g2">
+        <div class="glass pad reveal">
+          <div class="sec">SOC 2 Readiness</div>
+          <div class="arc-wrap">
+            <canvas class="arc" id="arc" width="264" height="264" role="img"
+                    aria-label="SOC 2 CC6.3 readiness score"></canvas>
+            <div class="arc-read">
+              <div class="arc-pct" id="arc-pct">—</div>
+              <div class="quota-k" style="margin-top:6px">CC6.3 · Least privilege</div>
+              <p class="arc-cap" id="arc-cap">Connect a repository to compute your readiness score.</p>
             </div>
           </div>
         </div>
 
-        <div class="card">
-          <div class="card-inner">
-            <div class="sec-label" style="margin-top:0">Recent Activity</div>
-            <div id="activity-feed">
-              <div class="skeleton" style="height:14px;margin-bottom:10px;width:80%"></div>
-              <div class="skeleton" style="height:14px;margin-bottom:10px;width:65%"></div>
-              <div class="skeleton" style="height:14px;width:75%"></div>
-            </div>
+        <div class="glass pad reveal">
+          <div class="sec">Activity Ledger</div>
+          <div id="ledger">
+            <div class="skel" style="height:14px;width:82%;margin-bottom:11px"></div>
+            <div class="skel" style="height:14px;width:66%;margin-bottom:11px"></div>
+            <div class="skel" style="height:14px;width:74%"></div>
           </div>
         </div>
       </div>
-    </div>
+    </section>
 
-    <!-- ROLES PAGE -->
-    <div class="page" id="page-roles">
-      <div class="page-head">
+    <!-- ── ROLES ────────────────────────────────────────────────────── -->
+    <section class="view" id="v-roles" aria-labelledby="h-roles">
+      <div class="masthead">
         <div>
-          <div class="page-eyebrow">Sweeper Engine</div>
-          <h1 class="page-title">IAM Roles</h1>
-          <p class="page-sub">Cooling-off countdowns and state for every tracked role. PRs open automatically after 14 days of confirmed dormancy.</p>
+          <div class="eyebrow">Sweeper Engine</div>
+          <h1 class="title" id="h-roles">IAM Roles</h1>
+          <p class="dek">Cooling-off countdowns for every tracked role. Reduction PRs open automatically after 14 days of confirmed dormancy — no ticket, no human in the loop.</p>
         </div>
-        <button onclick="loadRoles()">
-          <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
-            <path d="M11.5 6.5A5 5 0 1 1 6.5 1.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
-            <path d="M11.5 1.5v3h-3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
+        <button class="btn" data-reload="roles">
+          <svg width="13" height="13" viewBox="0 0 13 13" fill="none" aria-hidden="true">
+            <path d="M11.6 6.5A5.1 5.1 0 1 1 6.5 1.4" stroke="currentColor" stroke-width="1.35" stroke-linecap="round"/>
+            <path d="M11.6 1.4v3.2H8.4" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round"/>
           </svg>
           Refresh
         </button>
       </div>
-      <div id="roles-list">
-        <div class="skeleton" style="height:72px;border-radius:14px;margin-bottom:10px"></div>
-        <div class="skeleton" style="height:72px;border-radius:14px;margin-bottom:10px"></div>
-        <div class="skeleton" style="height:72px;border-radius:14px"></div>
+      <div id="roles-list" aria-live="polite">
+        <div class="skel" style="height:78px;border-radius:18px;margin-bottom:10px"></div>
+        <div class="skel" style="height:78px;border-radius:18px;margin-bottom:10px"></div>
+        <div class="skel" style="height:78px;border-radius:18px"></div>
       </div>
-    </div>
+    </section>
 
-    <!-- THREATS PAGE -->
-    <div class="page" id="page-threats">
-      <div class="page-head">
+    <!-- ── THREATS ──────────────────────────────────────────────────── -->
+    <section class="view" id="v-threats" aria-labelledby="h-threats">
+      <div class="masthead">
         <div>
-          <div class="page-eyebrow">STRIDE Analysis</div>
-          <h1 class="page-title">Threats</h1>
-          <p class="page-sub">All identified IAM threats across your projects, mapped to SOC2 controls.</p>
+          <div class="eyebrow">STRIDE Analysis</div>
+          <h1 class="title" id="h-threats">Threats</h1>
+          <p class="dek">Every identified IAM threat across your estate, mapped to SOC&nbsp;2, ISO&nbsp;27001 and NIST controls.</p>
         </div>
         <div class="row">
-          <select id="threat-project-filter" onchange="loadThreats()" style="width:auto;margin:0;font-size:12px;">
+          <select id="filter-project" class="field-w" style="font-size:12px" aria-label="Filter by project">
             <option value="">All projects</option>
           </select>
-          <button onclick="loadThreats()">Refresh</button>
+          <select id="filter-sev" class="field-w" style="font-size:12px" aria-label="Filter by severity">
+            <option value="">All severities</option>
+            <option value="Critical">Critical</option>
+            <option value="High">High</option>
+            <option value="Medium">Medium</option>
+            <option value="Low">Low</option>
+          </select>
+          <button class="btn" data-reload="threats">Refresh</button>
         </div>
       </div>
-      <div id="threats-list">
-        <div class="skeleton" style="height:120px;border-radius:14px;margin-bottom:10px"></div>
-        <div class="skeleton" style="height:120px;border-radius:14px;margin-bottom:10px"></div>
+      <div id="threats-list" aria-live="polite">
+        <div class="skel" style="height:132px;border-radius:18px;margin-bottom:10px"></div>
+        <div class="skel" style="height:132px;border-radius:18px"></div>
       </div>
-    </div>
+    </section>
 
-    <!-- GENERATE PAGE -->
-    <div class="page" id="page-generate">
-      <div class="page-head">
+    <!-- ── GENERATE ─────────────────────────────────────────────────── -->
+    <section class="view" id="v-generate" aria-labelledby="h-generate">
+      <div class="masthead">
         <div>
-          <div class="page-eyebrow">Threat Intelligence</div>
-          <h1 class="page-title">New Analysis</h1>
-          <p class="page-sub">Upload infrastructure or describe your architecture. ACE identifies STRIDE threats and maps them to SOC2 controls.</p>
+          <div class="eyebrow">Threat Intelligence</div>
+          <h1 class="title" id="h-generate">New Analysis</h1>
+          <p class="dek">Upload infrastructure, paste an architecture, or import a repository. ACE returns STRIDE threats mapped to the controls your auditor will ask about.</p>
         </div>
       </div>
 
-      <div class="card">
-        <div class="card-inner">
-          <div class="tab-bar">
-            <button class="tab-btn active" data-tab="file">Upload Config</button>
-            <button class="tab-btn" data-tab="text">Describe Manually</button>
-            <button class="tab-btn" data-tab="github">Import from GitHub</button>
-          </div>
+      <div class="glass pad">
+        <div class="seg" role="tablist" aria-label="Analysis source">
+          <button class="seg-b on" data-tab="file"   role="tab" aria-selected="true"  id="tab-file">Upload Config</button>
+          <button class="seg-b"    data-tab="text"   role="tab" aria-selected="false" id="tab-text">Describe Manually</button>
+          <button class="seg-b"    data-tab="github" role="tab" aria-selected="false" id="tab-github">Import from GitHub</button>
+        </div>
 
-          <div id="gtab-file">
-            <input id="g-fname" placeholder="Project name" maxlength="200">
-            <div class="drop" id="drop-zone">
-              <span class="drop-icon">⬆</span>
-              <p>Drop a Terraform, HCL, YAML, or Dockerfile here</p>
-              <small>.tf .hcl .yaml .yml .json .txt · max 100KB</small>
-              <input type="file" id="file-input" style="display:none">
+        <div id="pane-file" role="tabpanel" aria-labelledby="tab-file">
+          <input id="in-file-name" placeholder="Project name" maxlength="200" autocomplete="off">
+          <div class="drop" id="drop" role="button" tabindex="0" aria-label="Upload an infrastructure file">
+            <svg class="drop-ic" viewBox="0 0 38 38" fill="none" aria-hidden="true">
+              <path d="M19 26V8m0 0-6.5 6.5M19 8l6.5 6.5" stroke="url(#lum)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M5 24v3.5A3.5 3.5 0 0 0 8.5 31h21a3.5 3.5 0 0 0 3.5-3.5V24" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" opacity=".55"/>
+            </svg>
+            <p>Drop a Terraform, HCL, YAML, JSON or Dockerfile</p>
+            <small>.tf .hcl .yaml .yml .json .txt · Dockerfile · max 100&nbsp;KB</small>
+            <input type="file" id="file-input" hidden
+                   accept=".tf,.hcl,.yaml,.yml,.json,.txt,Dockerfile,dockerfile">
+          </div>
+          <p class="status" id="st-file" role="status" aria-live="polite"></p>
+        </div>
+
+        <div id="pane-text" role="tabpanel" aria-labelledby="tab-text" hidden>
+          <input id="in-text-name" placeholder="Project name" maxlength="200" autocomplete="off">
+          <textarea id="in-desc" maxlength="8000"
+            placeholder="Describe your architecture — AWS services, IAM roles, trust boundaries, data flows…"></textarea>
+          <div class="spread" style="margin-top:12px">
+            <div class="row">
+              <button class="btn btn--primary magnetic" id="btn-demo">
+                Analyze free
+              </button>
+              <button class="btn" id="btn-save">Save to workspace</button>
             </div>
-            <p class="status" id="file-status"></p>
+            <span class="pill pill--mute pill--xs" id="demo-left">Free demo</span>
           </div>
+          <p class="status" id="st-text" role="status" aria-live="polite"></p>
+        </div>
 
-          <div id="gtab-text" style="display:none">
-            <input id="g-name" placeholder="Project name" maxlength="200">
-            <textarea id="g-desc" placeholder="Describe your system architecture, AWS services, and IAM roles..." maxlength="8000"></textarea>
-            <div class="row" style="margin-top:12px">
-              <button class="primary" id="btn-demo">Analyze (Free Demo)</button>
-              <button id="btn-save">Sign in to Save</button>
-            </div>
-            <p class="status" id="text-status"></p>
-          </div>
-
-          <div id="gtab-github" style="display:none">
-            <input id="g-ghname" placeholder="Project name" maxlength="200">
-            <input id="g-ghurl" placeholder="https://github.com/owner/repo" maxlength="300">
-            <button class="primary" style="margin-top:12px;width:100%" id="btn-github">
-              Import + Analyze
-            </button>
-            <p class="status" id="github-status"></p>
-          </div>
+        <div id="pane-github" role="tabpanel" aria-labelledby="tab-github" hidden>
+          <input id="in-gh-name" placeholder="Project name" maxlength="200" autocomplete="off">
+          <input id="in-gh-url"  placeholder="https://github.com/owner/repo" maxlength="300"
+                 inputmode="url" autocomplete="off" spellcheck="false">
+          <button class="btn btn--primary btn--block magnetic" id="btn-github" style="margin-top:12px">
+            Import + Analyze
+          </button>
+          <p class="status" id="st-github" role="status" aria-live="polite"></p>
         </div>
       </div>
 
-      <div id="gen-results"></div>
-    </div>
+      <div id="gen-out"></div>
+    </section>
 
-    <!-- EVIDENCE PAGE -->
-    <div class="page" id="page-evidence">
-      <div class="page-head">
+    <!-- ── EVIDENCE ─────────────────────────────────────────────────── -->
+    <section class="view" id="v-evidence" aria-labelledby="h-evidence">
+      <div class="masthead">
         <div>
-          <div class="page-eyebrow">SOC2 CC6.3</div>
-          <h1 class="page-title">Evidence PDFs</h1>
-          <p class="page-sub">Tamper-proof audit packages. Each PDF contains the threat, excess permissions, the PR, the commit SHA, and the approver's name.</p>
+          <div class="eyebrow">SOC 2 · CC6.3</div>
+          <h1 class="title" id="h-evidence">Evidence Vault</h1>
+          <p class="dek">Tamper-evident audit packages. Each PDF binds the threat, the excess permission, the reduction PR, the commit SHA and the approver into one hash-sealed artifact.</p>
         </div>
       </div>
-      <div id="evidence-list">
-        <div class="skeleton" style="height:80px;border-radius:14px;margin-bottom:10px"></div>
-        <div class="skeleton" style="height:80px;border-radius:14px;margin-bottom:10px"></div>
+      <div id="evidence-list" aria-live="polite">
+        <div class="skel" style="height:88px;border-radius:18px;margin-bottom:10px"></div>
+        <div class="skel" style="height:88px;border-radius:18px"></div>
       </div>
-    </div>
+    </section>
+
+    <!-- ── PRICING (full page, mirrors modal) ───────────────────────── -->
+    <section class="view" id="v-pricing" aria-labelledby="h-pricing">
+      <div class="masthead">
+        <div>
+          <div class="eyebrow aurum">Plans</div>
+          <h1 class="title" id="h-pricing">Priced against the audit, not the seat</h1>
+          <p class="dek">A single SOC&nbsp;2 readiness engagement runs $18k–$45k and a failed CC6.3 control delays the report by weeks. ACE is priced at a fraction of one finding.</p>
+        </div>
+      </div>
+      <div id="pricing-page"></div>
+    </section>
 
   </main>
 </div>
 
-<!-- Toast container -->
-<div class="toast-wrap" id="toasts"></div>
-
-<script src="/app.js"></script>
-<script>
-/* ─── NAVIGATION ─────────────────────────────────────── */
-function navigate(page) {
-  document.querySelectorAll('.nav-item').forEach(el => {
-    el.classList.toggle('active', el.dataset.page === page);
-  });
-  document.querySelectorAll('.page').forEach(el => {
-    const active = el.id === `page-${page}`;
-    el.classList.toggle('active', active);
-  });
-  if (page === 'overview')  loadOverview();
-  if (page === 'roles')     loadRoles();
-  if (page === 'threats')   loadThreats();
-  if (page === 'evidence')  loadEvidence();
-}
-
-document.querySelectorAll('.nav-item[data-page]').forEach(el => {
-  el.addEventListener('click', () => navigate(el.dataset.page));
-});
-
-/* ─── TOAST ──────────────────────────────────────────── */
-function toast(msg, type = 'info') {
-  const colors = { ok: 'var(--green)', err: 'var(--red)', info: 'var(--a1)' };
-  const t = document.createElement('div');
-  t.className = 'toast';
-  t.innerHTML = `<span style="width:7px;height:7px;border-radius:50%;background:${colors[type]};box-shadow:0 0 8px ${colors[type]};flex-shrink:0"></span>${msg}`;
-  document.getElementById('toasts').appendChild(t);
-  setTimeout(() => t.remove(), 4000);
-}
-
-/* ─── TAB SWITCHING (generate page) ─────────────────── */
-document.querySelectorAll('.tab-btn').forEach(btn => {
-  btn.addEventListener('click', function () {
-    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-    this.classList.add('active');
-    ['file','text','github'].forEach(t => {
-      document.getElementById(`gtab-${t}`).style.display = this.dataset.tab === t ? '' : 'none';
-    });
-  });
-});
-
-/* ─── DROP ZONE ──────────────────────────────────────── */
-const dropZone = document.getElementById('drop-zone');
-const fileInput = document.getElementById('file-input');
-const fileStatus = document.getElementById('file-status');
-
-dropZone.addEventListener('click', () => fileInput.click());
-
-dropZone.addEventListener('dragover', e => {
-  e.preventDefault();
-  dropZone.classList.add('drag-over');
-});
-
-dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
-
-dropZone.addEventListener('drop', e => {
-  e.preventDefault();
-  dropZone.classList.remove('drag-over');
-  const file = e.dataTransfer.files[0];
-  if (file) handleFile(file);
-});
-
-fileInput.addEventListener('change', () => {
-  if (fileInput.files[0]) handleFile(fileInput.files[0]);
-});
-
-async function handleFile(file) {
-  const allowed = ['.tf','.hcl','.yaml','.yml','.json','.txt'];
-  const lower = file.name.toLowerCase();
-  const ok = lower === 'dockerfile' || lower.endsWith('dockerfile') || allowed.some(e => lower.endsWith(e));
-  if (!ok) { fileStatus.textContent = 'Unsupported file type.'; fileStatus.className = 'status err'; return; }
-  if (file.size > 100000) { fileStatus.textContent = 'File too large (max 100KB).'; fileStatus.className = 'status err'; return; }
-
-  fileStatus.innerHTML = '<span class="spinner"></span> Analyzing…';
-  fileStatus.className = 'status';
-
-  const jwt = getJwt();
-  if (!jwt) { fileStatus.textContent = 'Sign in to analyze files.'; fileStatus.className = 'status err'; return; }
-
-  const fd = new FormData();
-  fd.append('file', file);
-  const name = document.getElementById('g-fname').value.trim() || file.name;
-
-  try {
-    const r = await fetch(`/api/generate-from-file?name=${encodeURIComponent(name)}`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${jwt}` },
-      body: fd,
-    });
-    const data = await r.json();
-    if (!r.ok) throw new Error(data.detail || 'Analysis failed.');
-    fileStatus.textContent = `✓ ${data.threat_model.threats.length} threats found`;
-    fileStatus.className = 'status ok';
-    renderThreats(data.threat_model, data.project_id, 'gen-results');
-    toast(`Analysis complete — ${data.threat_model.threats.length} threats found`, 'ok');
-  } catch (e) {
-    fileStatus.textContent = e.message;
-    fileStatus.className = 'status err';
-    toast(e.message, 'err');
-  }
-}
-
-/* ─── DEMO / SAVE ────────────────────────────────────── */
-document.getElementById('btn-demo').addEventListener('click', async () => {
-  const desc = document.getElementById('g-desc').value.trim();
-  const st = document.getElementById('text-status');
-  if (!desc) { st.textContent = 'Describe your system first.'; st.className = 'status err'; return; }
-
-  st.innerHTML = '<span class="spinner"></span> Analyzing…';
-  st.className = 'status';
-
-  try {
-    const r = await fetch('/api/demo', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: 'Demo', architecture_description: desc }),
-    });
-    const data = await r.json();
-    if (!r.ok) throw new Error(data.detail);
-    st.textContent = `✓ ${data.threat_model.threats.length} threats found`;
-    st.className = 'status ok';
-    renderThreats(data.threat_model, null, 'gen-results');
-  } catch (e) {
-    st.textContent = e.message;
-    st.className = 'status err';
-  }
-});
-
-document.getElementById('btn-github').addEventListener('click', async () => {
-  const url = document.getElementById('g-ghurl').value.trim();
-  const name = document.getElementById('g-ghname').value.trim() || 'GitHub Import';
-  const st = document.getElementById('github-status');
-  const jwt = getJwt();
-  if (!jwt) { st.textContent = 'Sign in to use GitHub import.'; st.className = 'status err'; return; }
-  if (!url) { st.textContent = 'Enter a GitHub repo URL.'; st.className = 'status err'; return; }
-
-  st.innerHTML = '<span class="spinner"></span> Importing…';
-  st.className = 'status';
-
-  try {
-    const r = await fetch('/api/generate-from-github', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${jwt}` },
-      body: JSON.stringify({ name, repo_url: url }),
-    });
-    const data = await r.json();
-    if (!r.ok) throw new Error(data.detail);
-    st.textContent = `✓ ${data.threat_model.threats.length} threats found`;
-    st.className = 'status ok';
-    renderThreats(data.threat_model, data.project_id, 'gen-results');
-    toast('Import complete', 'ok');
-  } catch (e) {
-    st.textContent = e.message;
-    st.className = 'status err';
-    toast(e.message, 'err');
-  }
-});
-
-/* ─── RENDER THREATS ─────────────────────────────────── */
-function renderThreats(model, pid, containerId) {
-  const el = document.getElementById(containerId);
-  if (!model || !model.threats || !model.threats.length) {
-    el.innerHTML = `<div class="empty"><div class="empty-icon">🛡️</div><h3>No threats found</h3><p>No STRIDE threats were identified in this architecture.</p></div>`;
-    return;
-  }
-
-  const sev = s => ({'Critical':'critical','High':'high','Medium':'medium','Low':'low'}[s]||'low');
-
-  const cards = model.threats.map((t, i) => `
-    <div class="threat-card ${sev(t.severity)}" style="animation-delay:${i*50}ms">
-      <div class="threat-top">
-        <div class="threat-title">${esc(t.title)}</div>
-        <span class="badge ${sev(t.severity)}">${esc(t.severity)}</span>
+<!-- ══ PRICING MODAL ═════════════════════════════════════════════════ -->
+<div class="scrim" id="paywall" role="dialog" aria-modal="true" aria-labelledby="paywall-h" hidden>
+  <div class="modal" id="paywall-modal">
+    <button class="modal-x" id="paywall-x" aria-label="Close">
+      <svg width="13" height="13" viewBox="0 0 13 13" fill="none" aria-hidden="true">
+        <path d="M2 2l9 9M11 2l-9 9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+      </svg>
+    </button>
+    <div class="modal-head">
+      <div class="eyebrow aurum" style="justify-content:center" id="paywall-eyebrow">Upgrade</div>
+      <h2 class="modal-h" id="paywall-h">Unlock continuous enforcement</h2>
+      <p class="modal-d" id="paywall-d">You've reached the limits of the free tier.</p>
+      <div class="cycle" role="group" aria-label="Billing cycle">
+        <button class="cycle-b on" data-cycle="monthly">Monthly</button>
+        <button class="cycle-b" data-cycle="annual">Annual<span class="cycle-save">−20%</span></button>
       </div>
-      <div class="threat-meta">
-        <span>${esc(t.category)}</span>
-        <span>•</span>
-        <span>${esc(t.affected_component)}</span>
-      </div>
-      <div class="threat-soc2">${esc(t.soc2_control)}${t.iso27001_control ? ` · ISO ${esc(t.iso27001_control)}` : ''}${t.nist_control ? ` · NIST ${esc(t.nist_control)}` : ''}</div>
-      <div class="threat-desc">${esc(t.description)}</div>
-      <ul class="threat-mitigations">
-        ${t.mitigations.slice(0,3).map(m => `<li>${esc(m.description)}</li>`).join('')}
-      </ul>
-      ${pid ? `
-      <div class="threat-actions">
-        <select class="sm" id="status-${i}" onchange="setStatus('${pid}','${i}',this.value)" style="width:auto;margin:0">
-          <option value="pending">Pending</option>
-          <option value="accepted">Accepted</option>
-          <option value="rejected">Rejected</option>
-        </select>
-        <select class="sm" id="rem-${i}" onchange="setRemediation('${pid}','${i}',this.value)" style="width:auto;margin:0">
-          <option value="not_started">Not started</option>
-          <option value="in_progress">In progress</option>
-          <option value="resolved">Resolved</option>
-        </select>
-      </div>` : ''}
     </div>
-  `).join('');
+    <div class="plans" id="paywall-plans"></div>
+    <div class="modal-foot">
+      <span class="trust">
+        <svg viewBox="0 0 14 14" fill="none" aria-hidden="true"><path d="M7 1.2 12 3.4v4c0 3-2.1 4.9-5 5.6-2.9-.7-5-2.6-5-5.6v-4L7 1.2Z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg>
+        SOC 2 Type II infrastructure
+      </span>
+      <span class="trust">
+        <svg viewBox="0 0 14 14" fill="none" aria-hidden="true"><path d="M2 7.4l3.2 3.2L12 3.8" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        Cancel anytime
+      </span>
+      <span class="trust">
+        <svg viewBox="0 0 14 14" fill="none" aria-hidden="true"><rect x="2.4" y="6" width="9.2" height="6.6" rx="1.4" stroke="currentColor" stroke-width="1.2"/><path d="M4.6 6V4.3a2.4 2.4 0 0 1 4.8 0V6" stroke="currentColor" stroke-width="1.2"/></svg>
+        Your code never leaves your VPC
+      </span>
+    </div>
+  </div>
+</div>
 
-  el.innerHTML = `
-    <div class="sec-label">${model.threats.length} Threat${model.threats.length !== 1 ? 's' : ''} Identified</div>
-    <div class="card card-inner" style="padding:14px;margin-bottom:16px;font-size:13px;color:var(--text-dim);line-height:1.7">${esc(model.system_summary)}</div>
-    ${cards}
-  `;
+<!-- ══ COMMAND PALETTE ═══════════════════════════════════════════════ -->
+<div class="cmdk" id="cmdk" role="dialog" aria-modal="true" aria-label="Command palette" hidden>
+  <div class="cmdk-box">
+    <input class="cmdk-in" id="cmdk-in" placeholder="Search views, roles, actions…"
+           autocomplete="off" spellcheck="false" aria-controls="cmdk-list" role="combobox" aria-expanded="true">
+    <div class="cmdk-list" id="cmdk-list" role="listbox" aria-label="Results"></div>
+  </div>
+</div>
 
-  // Stagger animate
-  el.querySelectorAll('.threat-card').forEach((c, i) => {
-    c.style.opacity = '0';
-    c.style.transform = 'translateY(10px)';
-    setTimeout(() => {
-      c.style.transition = 'opacity 0.35s ease, transform 0.35s cubic-bezier(0.25,1,0.5,1)';
-      c.style.opacity = '';
-      c.style.transform = '';
-    }, i * 55);
-  });
-}
+<div class="toasts" id="toasts" role="region" aria-label="Notifications"></div>
 
-/* ─── LOAD OVERVIEW ──────────────────────────────────── */
-async function loadOverview() {
-  const jwt = getJwt();
-  if (!jwt) {
-    document.getElementById('overview-metrics').innerHTML = `
-      <div class="metric-card" style="grid-column:1/-1">
-        <div class="empty"><div class="empty-icon">🔐</div><h3>Sign in to view your dashboard</h3><p>Use the account at the bottom of the sidebar to authenticate.</p></div>
-      </div>`;
-    return;
-  }
-
-  try {
-    const [projectsRes, rolesRes] = await Promise.all([
-      fetch('/api/projects', { headers: { Authorization: `Bearer ${jwt}` } }),
-      fetch('/api/ace/sweeper-status', { headers: { Authorization: `Bearer ${jwt}` } }),
-    ]);
-
-    const projects = projectsRes.ok ? await projectsRes.json() : { projects: [] };
-    const rolesData = rolesRes.ok ? await rolesRes.json() : { roles: [] };
-
-    const roles = rolesData.roles || [];
-    const pending = roles.filter(r => r.state === 'PENDING_REDUCTION').length;
-    const open    = roles.filter(r => r.state === 'PR_OPEN').length;
-    const active  = roles.filter(r => r.state === 'ACTIVE').length;
-    const total   = roles.length;
-
-    const pcts  = total > 0 ? Math.round((active / total) * 100) : 100;
-    const plist = (projects.projects || []);
-
-    document.getElementById('overview-metrics').innerHTML = `
-      <div class="metric-card">
-        <div class="metric-label">Projects</div>
-        <div class="metric-value accent">${plist.length}</div>
-        <div class="metric-delta">Total analyzed</div>
-      </div>
-      <div class="metric-card">
-        <div class="metric-label">Roles Tracked</div>
-        <div class="metric-value">${total}</div>
-        <div class="metric-delta">${active} active, ${pending} pending</div>
-      </div>
-      <div class="metric-card">
-        <div class="metric-label">Open PRs</div>
-        <div class="metric-value ${open > 0 ? 'yellow' : 'green'}">${open}</div>
-        <div class="metric-delta">Awaiting merge</div>
-      </div>
-      <div class="metric-card">
-        <div class="metric-label">Pending Review</div>
-        <div class="metric-value ${pending > 0 ? 'red' : 'green'}">${pending}</div>
-        <div class="metric-delta">In cooling-off</div>
-      </div>
-    `;
-
-    document.getElementById('readiness-pct').textContent = `${pcts}%`;
-    document.getElementById('readiness-fill').style.width = `${pcts}%`;
-    document.getElementById('readiness-sub').textContent =
-      pcts === 100 ? 'All tracked roles are active — no dormancy detected.' :
-      `${total - active} role${total - active !== 1 ? 's' : ''} need attention before your audit.`;
-
-    // Update nav badge
-    const navCount = document.getElementById('nav-role-count');
-    if (pending > 0) {
-      navCount.textContent = pending;
-      navCount.style.display = '';
-    } else {
-      navCount.style.display = 'none';
-    }
-
-    // Activity feed
-    const feedItems = [
-      ...(pending > 0 ? [{ color: 'yellow', text: `${pending} role${pending!==1?'s':''} in cooling-off period`, time: 'Now' }] : []),
-      ...(open > 0    ? [{ color: 'blue',   text: `${open} permission reduction PR${open!==1?'s':''} open`,     time: 'Active' }] : []),
-      ...(plist.length > 0 ? [{ color: 'green', text: `${plist.length} project${plist.length!==1?'s':''} analyzed`, time: 'Up to date' }] : []),
-      { color: 'blue', text: 'ACE sweeper running', time: 'Continuous' },
-    ];
-
-    document.getElementById('activity-feed').innerHTML = feedItems.slice(0,4).map(f => `
-      <div class="feed-item">
-        <div class="feed-dot ${f.color}"></div>
-        <div>
-          <div class="feed-text">${f.text}</div>
-          <div class="feed-time">${f.time}</div>
-        </div>
-      </div>
-    `).join('') || '<p style="font-size:13px;color:var(--text-muted)">No recent activity.</p>';
-
-  } catch (e) {
-    toast('Could not load overview: ' + e.message, 'err');
-  }
-}
-
-/* ─── LOAD ROLES ─────────────────────────────────────── */
-async function loadRoles() {
-  const jwt = getJwt();
-  const el = document.getElementById('roles-list');
-
-  if (!jwt) {
-    el.innerHTML = `<div class="empty"><div class="empty-icon">🔐</div><h3>Sign in to view roles</h3></div>`;
-    return;
-  }
-
-  el.innerHTML = `
-    <div class="skeleton" style="height:72px;border-radius:14px;margin-bottom:10px"></div>
-    <div class="skeleton" style="height:72px;border-radius:14px;margin-bottom:10px"></div>
-    <div class="skeleton" style="height:72px;border-radius:14px"></div>
-  `;
-
-  try {
-    const r = await fetch('/api/ace/sweeper-status', { headers: { Authorization: `Bearer ${jwt}` } });
-    const data = await r.json();
-    const roles = data.roles || [];
-
-    if (!roles.length) {
-      el.innerHTML = `<div class="empty"><div class="empty-icon">✅</div><h3>No roles tracked yet</h3><p>Run <code>ace analyze</code> in your CI pipeline to start monitoring IAM roles.</p></div>`;
-      return;
-    }
-
-    const stateClass = s => ({
-      'ACTIVE': 'active', 'PENDING_REDUCTION': 'pending',
-      'REDUCTION_READY': 'ready', 'PR_OPEN': 'pr'
-    }[s] || 'active');
-
-    const stateLabel = s => ({
-      'ACTIVE': 'Active', 'PENDING_REDUCTION': 'Pending',
-      'REDUCTION_READY': 'Reduction Ready', 'PR_OPEN': 'PR Open'
-    }[s] || s);
-
-    el.innerHTML = roles.map((role, i) => `
-      <div class="role-card state-${stateClass(role.state)}" style="animation-delay:${i*40}ms">
-        <div>
-          <div class="role-name">${esc(role.role_name || role.role_arn)}</div>
-          <div class="role-repo">${esc(role.repo || '—')}</div>
-        </div>
-        <div class="role-right">
-          <div><span class="state-pill ${stateClass(role.state)}">${stateLabel(role.state)}</span></div>
-          ${role.state === 'PENDING_REDUCTION' && role.days_until_pr !== null ?
-            `<div class="countdown">PR opens in <b>${role.days_until_pr}d</b></div>` :
-            role.state === 'PR_OPEN' && role.pr_url ?
-            `<a href="${esc(role.pr_url)}" target="_blank" class="btn sm" style="margin-top:4px">View PR →</a>` : ''}
-        </div>
-      </div>
-    `).join('');
-
-    el.querySelectorAll('.role-card').forEach((c, i) => {
-      c.style.opacity = '0';
-      c.style.transform = 'translateX(-8px)';
-      setTimeout(() => {
-        c.style.transition = 'opacity 0.3s ease, transform 0.3s cubic-bezier(0.25,1,0.5,1)';
-        c.style.opacity = '';
-        c.style.transform = '';
-      }, i * 45);
-    });
-
-  } catch (e) {
-    el.innerHTML = `<div class="empty"><div class="empty-icon">⚠️</div><h3>Could not load roles</h3><p>${e.message}</p></div>`;
-  }
-}
-
-/* ─── LOAD THREATS ───────────────────────────────────── */
-async function loadThreats() {
-  const jwt = getJwt();
-  const el = document.getElementById('threats-list');
-  if (!jwt) {
-    el.innerHTML = `<div class="empty"><div class="empty-icon">🔐</div><h3>Sign in to view threats</h3></div>`;
-    return;
-  }
-
-  el.innerHTML = `<div class="skeleton" style="height:120px;border-radius:14px;margin-bottom:10px"></div><div class="skeleton" style="height:120px;border-radius:14px"></div>`;
-
-  try {
-    const r = await fetch('/api/projects', { headers: { Authorization: `Bearer ${jwt}` } });
-    const data = await r.json();
-    const projects = data.projects || [];
-
-    // Populate project filter
-    const sel = document.getElementById('threat-project-filter');
-    const existing = Array.from(sel.options).map(o => o.value);
-    projects.forEach(p => {
-      if (!existing.includes(p.id)) {
-        const o = document.createElement('option');
-        o.value = p.id;
-        o.textContent = p.name;
-        sel.appendChild(o);
-      }
-    });
-
-    const filterPid = sel.value;
-    const filtered = filterPid ? projects.filter(p => p.id === filterPid) : projects;
-
-    if (!filtered.length) {
-      el.innerHTML = `<div class="empty"><div class="empty-icon">🛡️</div><h3>No projects yet</h3><p>Run a new analysis to start finding threats.</p><button class="primary" onclick="navigate('generate')">New Analysis</button></div>`;
-      return;
-    }
-
-    // Gather all threats across projects
-    const allThreats = [];
-    await Promise.all(filtered.map(async p => {
-      const r2 = await fetch(`/api/projects/${p.id}`, { headers: { Authorization: `Bearer ${jwt}` } });
-      const d2 = await r2.json();
-      (d2.threats || []).forEach(t => allThreats.push({ ...t, _project: p.name, _pid: p.id }));
-    }));
-
-    if (!allThreats.length) {
-      el.innerHTML = `<div class="empty"><div class="empty-icon">✅</div><h3>No threats found</h3><p>Run a new analysis to identify STRIDE threats in your infrastructure.</p></div>`;
-      return;
-    }
-
-    const sev = s => ({'Critical':'critical','High':'high','Medium':'medium','Low':'low'}[s]||'low');
-
-    el.innerHTML = allThreats.map((t, i) => `
-      <div class="threat-card ${sev(t.severity)}" style="animation-delay:${i*45}ms">
-        <div class="threat-top">
-          <div>
-            <div style="font-size:10px;color:var(--text-muted);margin-bottom:4px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase">${esc(t._project)}</div>
-            <div class="threat-title">${esc(t.title)}</div>
-          </div>
-          <div style="display:flex;flex-direction:column;align-items:flex-end;gap:5px">
-            <span class="badge ${sev(t.severity)}">${esc(t.severity)}</span>
-            <span class="badge ${t.status||'pending'}">${esc(t.status||'pending')}</span>
-          </div>
-        </div>
-        <div class="threat-meta">
-          <span>${esc(t.category)}</span><span>•</span><span>${esc(t.affected_component)}</span>
-        </div>
-        <div class="threat-soc2">${esc(t.soc2_control)}</div>
-        <div class="threat-desc">${esc(t.description)}</div>
-        <div class="threat-actions">
-          <select class="sm" onchange="setThreatStatus('${t.id}',this.value)" style="width:auto;margin:0">
-            <option value="pending"   ${t.status==='pending'?'selected':''}>Pending</option>
-            <option value="accepted"  ${t.status==='accepted'?'selected':''}>Accepted</option>
-            <option value="rejected"  ${t.status==='rejected'?'selected':''}>Rejected</option>
-          </select>
-          <select class="sm" onchange="setThreatRemediation('${t.id}',this.value)" style="width:auto;margin:0">
-            <option value="not_started"  ${t.remediation_status==='not_started'?'selected':''}>Not started</option>
-            <option value="in_progress"  ${t.remediation_status==='in_progress'?'selected':''}>In progress</option>
-            <option value="resolved"     ${t.remediation_status==='resolved'?'selected':''}>Resolved</option>
-          </select>
-        </div>
-      </div>
-    `).join('');
-
-    el.querySelectorAll('.threat-card').forEach((c, i) => {
-      c.style.opacity = '0';
-      c.style.transform = 'translateY(10px)';
-      setTimeout(() => {
-        c.style.transition = 'opacity 0.35s ease, transform 0.35s cubic-bezier(0.25,1,0.5,1)';
-        c.style.opacity = '';
-        c.style.transform = '';
-      }, i * 50);
-    });
-
-  } catch (e) {
-    el.innerHTML = `<div class="empty"><div class="empty-icon">⚠️</div><h3>Could not load threats</h3><p>${e.message}</p></div>`;
-  }
-}
-
-/* ─── LOAD EVIDENCE ──────────────────────────────────── */
-async function loadEvidence() {
-  const jwt = getJwt();
-  const el = document.getElementById('evidence-list');
-  if (!jwt) {
-    el.innerHTML = `<div class="empty"><div class="empty-icon">🔐</div><h3>Sign in to view evidence</h3></div>`;
-    return;
-  }
-
-  el.innerHTML = `<div class="skeleton" style="height:80px;border-radius:14px;margin-bottom:10px"></div><div class="skeleton" style="height:80px;border-radius:14px"></div>`;
-
-  try {
-    const r = await fetch('/api/projects', { headers: { Authorization: `Bearer ${jwt}` } });
-    const data = await r.json();
-    const projects = data.projects || [];
-
-    if (!projects.length) {
-      el.innerHTML = `<div class="empty"><div class="empty-icon">📋</div><h3>No projects yet</h3><p>Run an analysis and complete IAM remediation to generate evidence PDFs.</p><button class="primary" onclick="navigate('generate')">New Analysis</button></div>`;
-      return;
-    }
-
-    el.innerHTML = projects.map((p, i) => `
-      <div class="evidence-card" style="animation-delay:${i*50}ms">
-        <div>
-          <div class="evidence-name">${esc(p.name)}</div>
-          <div class="evidence-meta">
-            <span>CC6.3 Evidence Package</span>
-            <span>•</span>
-            <span>${esc(p.created_at ? new Date(p.created_at).toLocaleDateString() : 'Unknown date')}</span>
-          </div>
-        </div>
-        <div class="row">
-          <button class="sm" onclick="downloadEvidence('${p.id}','${esc(p.name)}')">
-            <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-              <path d="M6 1v7M3 5.5l3 3 3-3M1.5 10h9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
-            </svg>
-            Download PDF
-          </button>
-        </div>
-      </div>
-    `).join('');
-
-    el.querySelectorAll('.evidence-card').forEach((c, i) => {
-      c.style.opacity = '0';
-      c.style.transform = 'translateY(8px)';
-      setTimeout(() => {
-        c.style.transition = 'opacity 0.3s ease, transform 0.3s cubic-bezier(0.25,1,0.5,1)';
-        c.style.opacity = '';
-        c.style.transform = '';
-      }, i * 50);
-    });
-
-  } catch (e) {
-    el.innerHTML = `<div class="empty"><div class="empty-icon">⚠️</div><h3>Could not load projects</h3><p>${e.message}</p></div>`;
-  }
-}
-
-async function downloadEvidence(pid, name) {
-  const jwt = getJwt();
-  if (!jwt) { toast('Sign in first', 'err'); return; }
-  toast('Generating PDF…', 'info');
-  try {
-    const r = await fetch(`/api/projects/${pid}/evidence-pdf`, { headers: { Authorization: `Bearer ${jwt}` } });
-    if (!r.ok) {
-      const d = await r.json();
-      throw new Error(d.detail || 'PDF generation failed');
-    }
-    const blob = await r.blob();
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `ace-evidence-${name.toLowerCase().replace(/\s+/g,'-')}.pdf`;
-    a.click();
-    URL.revokeObjectURL(url);
-    toast('PDF downloaded', 'ok');
-  } catch (e) {
-    toast(e.message, 'err');
-  }
-}
-
-/* ─── STATUS UPDATES ─────────────────────────────────── */
-async function setThreatStatus(tid, status) {
-  const jwt = getJwt();
-  if (!jwt) return;
-  try {
-    const r = await fetch(`/api/threats/${tid}/status`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${jwt}` },
-      body: JSON.stringify({ status }),
-    });
-    if (!r.ok) throw new Error('Update failed');
-    toast(`Status set to ${status}`, 'ok');
-  } catch (e) { toast(e.message, 'err'); }
-}
-
-async function setThreatRemediation(tid, status) {
-  const jwt = getJwt();
-  if (!jwt) return;
-  try {
-    const r = await fetch(`/api/threats/${tid}/remediation`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${jwt}` },
-      body: JSON.stringify({ status }),
-    });
-    if (!r.ok) throw new Error('Update failed');
-    toast(`Remediation: ${status.replace(/_/g,' ')}`, 'ok');
-  } catch (e) { toast(e.message, 'err'); }
-}
-
-/* ─── AUTH ───────────────────────────────────────────── */
-function getJwt() {
-  const s = window._supaSession;
-  return s ? s.access_token : null;
-}
-
-// Auth is handled by app.js — expose callback for when session changes
-window._onSessionChange = function(session) {
-  if (session) {
-    const email = session.user?.email || '';
-    document.getElementById('user-email').textContent = email;
-    document.getElementById('user-initial').textContent = email[0]?.toUpperCase() || '?';
-    document.getElementById('sign-toggle').textContent = 'Sign out';
-    loadOverview();
-  } else {
-    document.getElementById('user-email').textContent = 'Not signed in';
-    document.getElementById('user-initial').textContent = '?';
-    document.getElementById('sign-toggle').textContent = 'Sign in';
-  }
-};
-
-// Wire sign-in/out via addEventListener — onclick on dynamic elements blocked by CSP
-document.getElementById('sign-toggle').addEventListener('click', () => {
-  if (window._supaSession) {
-    window._supaSignOut?.();
-  } else {
-    window._supaSignIn?.();
-  }
-});
-
-/* ─── UTILS ──────────────────────────────────────────── */
-function esc(s) {
-  if (s === null || s === undefined) return '';
-  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-}
-
-/* ─── MAGNETIC BUTTONS ───────────────────────────────── */
-document.querySelectorAll('button.primary').forEach(btn => {
-  btn.addEventListener('mousemove', e => {
-    const r = btn.getBoundingClientRect();
-    const x = e.clientX - r.left - r.width  / 2;
-    const y = e.clientY - r.top  - r.height / 2;
-    btn.style.transform = `translate(${x * 0.10}px, ${y * 0.10 - 2}px)`;
-  });
-  btn.addEventListener('mouseleave', () => { btn.style.transform = ''; });
-});
-
-/* ─── INIT ───────────────────────────────────────────── */
-loadOverview();
-</script>
+<!-- Load order matters: the Supabase SDK and app.js are both deferred, so they
+     execute in document order AFTER parsing. This removes the original race
+     where app.js could fire _onSessionChange before index.html defined it. -->
+<script defer src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"
+        crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+<script defer src="/app.js"></script>
 </body>
 </html>
