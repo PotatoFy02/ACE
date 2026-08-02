@@ -1,73 +1,1913 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>ACE</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ACE — Automated Cybersecurity Engine</title>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <style>
-    body{font-family:system-ui,sans-serif;max-width:960px;margin:24px auto;padding:0 20px;color:#1a1a1a}
-    h1{margin-bottom:2px}.muted{color:#666;font-size:14px}
-    textarea{width:100%;height:120px;padding:10px;border:1px solid #ccc;border-radius:6px}
-    input,select{padding:8px;border:1px solid #ccc;border-radius:6px;margin:4px 0}
-    input.full{width:100%}
-    button{padding:9px 16px;margin:4px 4px 4px 0;cursor:pointer;border:1px solid #333;border-radius:6px;background:#fff}
-    button.primary{background:#2c3e50;color:#fff;border-color:#2c3e50}
-    button.sm{padding:4px 10px;font-size:13px}
-    .card{border:1px solid #ddd;padding:14px;margin:12px 0;border-radius:8px;background:#fff}
-    .threat.rejected{opacity:.4}.threat.accepted{border-color:#27ae60}.threat.pending{border-color:#f39c12}
-    .critical{border-left:6px solid #c0392b}.high{border-left:6px solid #e67e22}
-    .medium{border-left:6px solid #f1c40f}.low{border-left:6px solid #27ae60}
-    .soc2{color:#2980b9;font-size:13px}
-    .badge{font-size:12px;padding:2px 8px;border-radius:10px;color:#fff}
-    .b-pending{background:#f39c12}.b-accepted{background:#27ae60}.b-rejected{background:#c0392b}
-    .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
-    .dash{display:flex;gap:16px;flex-wrap:wrap}
-    .metric{background:#f5f6fa;border-radius:8px;padding:16px;min-width:120px;text-align:center}
-    .metric b{font-size:26px;display:block}
-    .bar{height:14px;border-radius:7px;background:#eee;overflow:hidden;margin:8px 0}
-    .bar>span{display:block;height:100%;background:#27ae60}
-    .drop{border:2px dashed #aaa;border-radius:8px;padding:24px;text-align:center;color:#666;cursor:pointer}
-    footer{margin-top:40px;font-size:13px;color:#888}
+    /* ── TOKEN SYSTEM ──────────────────────────────────────────────── */
+    :root {
+      /* Surface */
+      --bg:          #03040a;
+      --bg-2:        #07080f;
+      --surface:     rgba(255,255,255,0.032);
+      --surface-2:   rgba(255,255,255,0.058);
+      --surface-3:   rgba(255,255,255,0.014);
+      --border:      rgba(255,255,255,0.07);
+      --border-hi:   rgba(255,255,255,0.14);
+
+      /* Text */
+      --text:        #eeeef5;
+      --text-dim:    #9898b8;
+      --text-muted:  #4a4a6a;
+
+      /* Accent — electric indigo shifting to cobalt */
+      --a1:          #5b7fff;
+      --a2:          #8b5cf6;
+      --a3:          #06b6d4;
+      --a-glow:      rgba(91,127,255,0.28);
+      --a-dim:       rgba(91,127,255,0.10);
+
+      /* Semantic */
+      --green:       #34d399;
+      --green-dim:   rgba(52,211,153,0.10);
+      --yellow:      #fbbf24;
+      --yellow-dim:  rgba(251,191,36,0.10);
+      --red:         #f87171;
+      --red-dim:     rgba(248,113,113,0.10);
+      --orange:      #fb923c;
+
+      /* Geometry */
+      --r:           10px;
+      --r-lg:        16px;
+      --r-xl:        22px;
+      --blur:        blur(22px);
+      --blur-sm:     blur(10px);
+
+      /* Type scale */
+      --f-xs:  11px;
+      --f-sm:  13px;
+      --f-md:  15px;
+      --f-lg:  18px;
+      --f-xl:  24px;
+      --f-2xl: 32px;
+      --f-3xl: 44px;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html { scroll-behavior: smooth; -webkit-font-smoothing: antialiased; }
+
+    body {
+      font-family: "SF Pro Display", "Inter", -apple-system, BlinkMacSystemFont, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      line-height: 1.6;
+      overflow-x: hidden;
+    }
+
+    /* ── AMBIENT CANVAS ────────────────────────────────────────────── */
+    .ambient {
+      position: fixed;
+      inset: 0;
+      z-index: 0;
+      pointer-events: none;
+      overflow: hidden;
+    }
+
+    .orb {
+      position: absolute;
+      border-radius: 50%;
+      filter: blur(90px);
+      will-change: transform;
+      animation: drift linear infinite alternate;
+    }
+
+    .orb-1 {
+      width: 700px; height: 700px;
+      background: radial-gradient(circle, rgba(91,127,255,0.14), transparent 70%);
+      top: -200px; left: -160px;
+      animation-duration: 22s;
+    }
+
+    .orb-2 {
+      width: 560px; height: 560px;
+      background: radial-gradient(circle, rgba(139,92,246,0.12), transparent 70%);
+      bottom: -180px; right: -120px;
+      animation-duration: 28s;
+      animation-delay: -10s;
+    }
+
+    .orb-3 {
+      width: 320px; height: 320px;
+      background: radial-gradient(circle, rgba(6,182,212,0.08), transparent 70%);
+      top: 42%; left: 55%;
+      animation-duration: 35s;
+      animation-delay: -5s;
+    }
+
+    @keyframes drift {
+      from { transform: translate(0, 0) scale(1); }
+      to   { transform: translate(50px, 35px) scale(1.12); }
+    }
+
+    /* Dot grid */
+    .dot-grid {
+      position: fixed;
+      inset: 0;
+      z-index: 0;
+      pointer-events: none;
+      background-image: radial-gradient(circle, rgba(255,255,255,0.04) 1px, transparent 1px);
+      background-size: 28px 28px;
+      mask-image: radial-gradient(ellipse 75% 75% at 50% 50%, black 30%, transparent 100%);
+      -webkit-mask-image: radial-gradient(ellipse 75% 75% at 50% 50%, black 30%, transparent 100%);
+    }
+
+    /* ── LAYOUT ────────────────────────────────────────────────────── */
+    .shell {
+      position: relative;
+      z-index: 1;
+      display: grid;
+      grid-template-columns: 220px 1fr;
+      min-height: 100vh;
+    }
+
+    /* ── SIDEBAR NAV ───────────────────────────────────────────────── */
+    .nav {
+      position: sticky;
+      top: 0;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      padding: 28px 16px 24px;
+      border-right: 1px solid var(--border);
+      background: rgba(3,4,10,0.7);
+      backdrop-filter: var(--blur);
+      -webkit-backdrop-filter: var(--blur);
+    }
+
+    .nav-logo {
+      display: flex;
+      align-items: center;
+      gap: 11px;
+      margin-bottom: 40px;
+      padding: 0 6px;
+    }
+
+    /* Signature element: custom canvas hexagon logo mark */
+    .logo-hex {
+      width: 34px;
+      height: 34px;
+      flex-shrink: 0;
+    }
+
+    .logo-text {
+      display: flex;
+      flex-direction: column;
+    }
+
+    .logo-name {
+      font-size: 15px;
+      font-weight: 800;
+      letter-spacing: 0.06em;
+      color: var(--text);
+      line-height: 1;
+    }
+
+    .logo-sub {
+      font-size: 9px;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--text-muted);
+      margin-top: 3px;
+    }
+
+    .nav-section {
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--text-muted);
+      padding: 0 10px;
+      margin-bottom: 6px;
+      margin-top: 24px;
+    }
+
+    .nav-section:first-of-type { margin-top: 0; }
+
+    .nav-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 10px;
+      border-radius: var(--r);
+      cursor: pointer;
+      font-size: var(--f-sm);
+      color: var(--text-muted);
+      transition: all 0.18s cubic-bezier(0.25,1,0.5,1);
+      border: 1px solid transparent;
+      margin-bottom: 2px;
+      user-select: none;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .nav-item::before {
+      content: '';
+      position: absolute;
+      left: 0; top: 0; bottom: 0;
+      width: 2px;
+      background: linear-gradient(to bottom, var(--a1), var(--a2));
+      opacity: 0;
+      transition: opacity 0.18s;
+      border-radius: 0 2px 2px 0;
+    }
+
+    .nav-item:hover {
+      color: var(--text);
+      background: var(--surface);
+      border-color: var(--border);
+    }
+
+    .nav-item.active {
+      color: var(--text);
+      background: var(--a-dim);
+      border-color: rgba(91,127,255,0.18);
+    }
+
+    .nav-item.active::before { opacity: 1; }
+
+    .nav-icon {
+      width: 15px;
+      height: 15px;
+      opacity: 0.6;
+      flex-shrink: 0;
+      transition: opacity 0.18s;
+    }
+
+    .nav-item.active .nav-icon,
+    .nav-item:hover .nav-icon { opacity: 1; }
+
+    .nav-pill {
+      margin-left: auto;
+      font-size: 9px;
+      font-weight: 700;
+      background: var(--red-dim);
+      color: var(--red);
+      border-radius: 20px;
+      padding: 2px 7px;
+      letter-spacing: 0.04em;
+    }
+
+    .nav-bottom {
+      margin-top: auto;
+      padding-top: 16px;
+      border-top: 1px solid var(--border);
+    }
+
+    .nav-user {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 10px;
+      border-radius: var(--r);
+      font-size: var(--f-sm);
+      color: var(--text-dim);
+    }
+
+    .user-avatar {
+      width: 28px; height: 28px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, var(--a1), var(--a2));
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 11px;
+      font-weight: 700;
+      color: #fff;
+      flex-shrink: 0;
+    }
+
+    /* ── MAIN CONTENT ──────────────────────────────────────────────── */
+    .main {
+      min-height: 100vh;
+      padding: 32px 40px 80px;
+      overflow-y: auto;
+    }
+
+    .page { display: none; animation: fade-rise 0.4s cubic-bezier(0.25,1,0.5,1) both; }
+    .page.active { display: block; }
+
+    @keyframes fade-rise {
+      from { opacity: 0; transform: translateY(14px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    /* ── PAGE HEADER ───────────────────────────────────────────────── */
+    .page-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      margin-bottom: 36px;
+      gap: 16px;
+    }
+
+    .page-eyebrow {
+      font-size: var(--f-xs);
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--a1);
+      margin-bottom: 6px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .page-eyebrow::before {
+      content: '';
+      width: 5px; height: 5px;
+      border-radius: 50%;
+      background: var(--a1);
+      box-shadow: 0 0 8px var(--a1);
+      animation: pulse-dot 2.5s ease-in-out infinite;
+    }
+
+    @keyframes pulse-dot {
+      0%,100% { opacity: 1; transform: scale(1); }
+      50%      { opacity: 0.4; transform: scale(0.7); }
+    }
+
+    .page-title {
+      font-size: var(--f-2xl);
+      font-weight: 800;
+      letter-spacing: -0.03em;
+      line-height: 1.1;
+      color: var(--text);
+    }
+
+    .page-sub {
+      font-size: var(--f-sm);
+      color: var(--text-muted);
+      margin-top: 8px;
+      max-width: 480px;
+    }
+
+    /* ── GLASS CARD ────────────────────────────────────────────────── */
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--r-xl);
+      backdrop-filter: var(--blur-sm);
+      -webkit-backdrop-filter: var(--blur-sm);
+      position: relative;
+      overflow: hidden;
+      transition: border-color 0.2s, transform 0.2s;
+    }
+
+    .card:hover { border-color: var(--border-hi); }
+
+    .card-inner { padding: 24px; }
+
+    /* Top shimmer line on cards */
+    .card::after {
+      content: '';
+      position: absolute;
+      top: 0; left: 10%; right: 10%;
+      height: 1px;
+      background: linear-gradient(90deg, transparent, rgba(91,127,255,0.35), transparent);
+      pointer-events: none;
+    }
+
+    /* ── METRIC GRID ───────────────────────────────────────────────── */
+    .metric-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 14px;
+      margin-bottom: 24px;
+    }
+
+    .metric-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--r-lg);
+      padding: 20px;
+      transition: all 0.22s cubic-bezier(0.25,1,0.5,1);
+      cursor: default;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .metric-card::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      border-radius: var(--r-lg);
+      background: radial-gradient(circle at 30% 20%, rgba(91,127,255,0.06), transparent 60%);
+      opacity: 0;
+      transition: opacity 0.3s;
+    }
+
+    .metric-card:hover {
+      border-color: var(--border-hi);
+      transform: translateY(-3px);
+    }
+
+    .metric-card:hover::before { opacity: 1; }
+
+    .metric-label {
+      font-size: var(--f-xs);
+      font-weight: 600;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--text-muted);
+      margin-bottom: 12px;
+    }
+
+    .metric-value {
+      font-size: 36px;
+      font-weight: 900;
+      letter-spacing: -0.04em;
+      line-height: 1;
+      color: var(--text);
+    }
+
+    .metric-value.accent { color: var(--a1); }
+    .metric-value.green  { color: var(--green); }
+    .metric-value.red    { color: var(--red); }
+    .metric-value.yellow { color: var(--yellow); }
+
+    .metric-delta {
+      font-size: var(--f-xs);
+      color: var(--text-muted);
+      margin-top: 6px;
+    }
+
+    /* ── READINESS BAR ─────────────────────────────────────────────── */
+    .readiness-wrap { margin-top: 8px; }
+
+    .readiness-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      margin-bottom: 10px;
+    }
+
+    .readiness-label {
+      font-size: var(--f-xs);
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--text-muted);
+    }
+
+    .readiness-pct {
+      font-size: var(--f-xl);
+      font-weight: 900;
+      letter-spacing: -0.03em;
+      color: var(--green);
+    }
+
+    .readiness-track {
+      height: 5px;
+      background: rgba(255,255,255,0.05);
+      border-radius: 3px;
+      overflow: hidden;
+    }
+
+    .readiness-fill {
+      height: 100%;
+      border-radius: 3px;
+      background: linear-gradient(90deg, var(--green), #059669);
+      box-shadow: 0 0 12px rgba(52,211,153,0.5);
+      transition: width 1.2s cubic-bezier(0.25,1,0.5,1);
+    }
+
+    /* ── ACTIVITY FEED ─────────────────────────────────────────────── */
+    .feed-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+      padding: 12px 0;
+      border-bottom: 1px solid var(--border);
+      transition: all 0.18s;
+    }
+
+    .feed-item:last-child { border-bottom: none; }
+    .feed-item:hover { padding-left: 4px; }
+
+    .feed-dot {
+      width: 7px; height: 7px;
+      border-radius: 50%;
+      margin-top: 6px;
+      flex-shrink: 0;
+    }
+
+    .feed-dot.green  { background: var(--green); box-shadow: 0 0 6px var(--green); }
+    .feed-dot.yellow { background: var(--yellow); box-shadow: 0 0 6px var(--yellow); }
+    .feed-dot.red    { background: var(--red); box-shadow: 0 0 6px var(--red); }
+    .feed-dot.blue   { background: var(--a1); box-shadow: 0 0 6px var(--a1); }
+
+    .feed-text { font-size: var(--f-sm); color: var(--text-dim); line-height: 1.5; }
+    .feed-time { font-size: var(--f-xs); color: var(--text-muted); margin-top: 2px; }
+
+    /* ── SECTION LABEL ─────────────────────────────────────────────── */
+    .sec-label {
+      font-size: var(--f-xs);
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--text-muted);
+      margin: 32px 0 14px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .sec-label::after {
+      content: '';
+      flex: 1;
+      height: 1px;
+      background: var(--border);
+    }
+
+    /* ── ROLE CARDS (sweeper status) ───────────────────────────────── */
+    .role-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--r-lg);
+      padding: 18px 20px;
+      margin-bottom: 10px;
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 16px;
+      align-items: center;
+      transition: all 0.2s cubic-bezier(0.25,1,0.5,1);
+      position: relative;
+      overflow: hidden;
+    }
+
+    .role-card::before {
+      content: '';
+      position: absolute;
+      left: 0; top: 0; bottom: 0;
+      width: 3px;
+      border-radius: 0 2px 2px 0;
+    }
+
+    .role-card.state-active::before        { background: var(--green); }
+    .role-card.state-pending::before       { background: var(--yellow); }
+    .role-card.state-ready::before         { background: var(--orange); }
+    .role-card.state-pr::before            { background: var(--a1); }
+
+    .role-card:hover {
+      border-color: var(--border-hi);
+      transform: translateX(3px);
+    }
+
+    .role-name {
+      font-size: var(--f-md);
+      font-weight: 600;
+      color: var(--text);
+      margin-bottom: 3px;
+      font-family: "SF Mono", "Fira Code", monospace;
+      font-size: 13px;
+    }
+
+    .role-repo {
+      font-size: var(--f-xs);
+      color: var(--text-muted);
+    }
+
+    .role-right { text-align: right; }
+
+    .state-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      font-size: var(--f-xs);
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      padding: 4px 10px;
+      border-radius: 20px;
+      margin-bottom: 4px;
+    }
+
+    .state-pill.active  { background: var(--green-dim);  color: var(--green); }
+    .state-pill.pending { background: var(--yellow-dim); color: var(--yellow); }
+    .state-pill.ready   { background: rgba(249,115,22,0.1); color: var(--orange); }
+    .state-pill.pr      { background: var(--a-dim);      color: var(--a1); }
+
+    .countdown {
+      font-size: var(--f-xs);
+      color: var(--text-muted);
+    }
+
+    .countdown b { color: var(--yellow); }
+
+    /* ── COUNTDOWN RING ────────────────────────────────────────────── */
+    .ring-wrap {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    /* ── THREAT CARDS ──────────────────────────────────────────────── */
+    .threat-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--r-lg);
+      padding: 20px;
+      margin-bottom: 10px;
+      border-left: 3px solid transparent;
+      transition: all 0.2s cubic-bezier(0.25,1,0.5,1);
+    }
+
+    .threat-card:hover {
+      border-color: var(--border-hi);
+      transform: translateX(4px);
+    }
+
+    .threat-card.critical { border-left-color: var(--red); }
+    .threat-card.high     { border-left-color: var(--orange); }
+    .threat-card.medium   { border-left-color: var(--yellow); }
+    .threat-card.low      { border-left-color: var(--green); }
+
+    .threat-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 12px;
+      margin-bottom: 8px;
+    }
+
+    .threat-title {
+      font-size: var(--f-md);
+      font-weight: 700;
+      color: var(--text);
+      letter-spacing: -0.01em;
+    }
+
+    .badge {
+      font-size: 9px;
+      font-weight: 800;
+      padding: 3px 9px;
+      border-radius: 20px;
+      white-space: nowrap;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      flex-shrink: 0;
+    }
+
+    .badge.critical { background: var(--red-dim);           color: var(--red);    border: 1px solid rgba(248,113,113,0.2); }
+    .badge.high     { background: rgba(249,115,22,0.1);     color: var(--orange); border: 1px solid rgba(249,115,22,0.2); }
+    .badge.medium   { background: var(--yellow-dim);        color: var(--yellow); border: 1px solid rgba(251,191,36,0.2); }
+    .badge.low      { background: var(--green-dim);         color: var(--green);  border: 1px solid rgba(52,211,153,0.2); }
+    .badge.pending  { background: var(--yellow-dim);        color: var(--yellow); border: 1px solid rgba(251,191,36,0.2); }
+    .badge.accepted { background: var(--green-dim);         color: var(--green);  border: 1px solid rgba(52,211,153,0.2); }
+    .badge.rejected { background: var(--red-dim);           color: var(--red);    border: 1px solid rgba(248,113,113,0.2); }
+
+    .threat-meta {
+      font-size: var(--f-xs);
+      color: var(--text-muted);
+      margin-bottom: 6px;
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .threat-soc2 {
+      font-size: var(--f-xs);
+      color: var(--a1);
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      margin-bottom: 10px;
+    }
+
+    .threat-desc {
+      font-size: var(--f-sm);
+      color: var(--text-dim);
+      line-height: 1.7;
+      margin-bottom: 12px;
+    }
+
+    .threat-mitigations {
+      list-style: none;
+      margin-bottom: 14px;
+    }
+
+    .threat-mitigations li {
+      font-size: 12px;
+      color: var(--text-muted);
+      padding: 2px 0 2px 18px;
+      position: relative;
+      line-height: 1.5;
+    }
+
+    .threat-mitigations li::before {
+      content: "→";
+      position: absolute;
+      left: 0;
+      color: var(--a1);
+      font-size: 11px;
+    }
+
+    .threat-actions {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      align-items: center;
+      padding-top: 14px;
+      border-top: 1px solid var(--border);
+    }
+
+    /* ── EVIDENCE CARDS ────────────────────────────────────────────── */
+    .evidence-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--r-lg);
+      padding: 20px;
+      margin-bottom: 10px;
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 20px;
+      align-items: center;
+      transition: all 0.2s cubic-bezier(0.25,1,0.5,1);
+    }
+
+    .evidence-card:hover {
+      border-color: var(--border-hi);
+      transform: translateY(-2px);
+      box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+    }
+
+    .evidence-name {
+      font-size: var(--f-md);
+      font-weight: 700;
+      color: var(--text);
+      margin-bottom: 4px;
+    }
+
+    .evidence-meta {
+      font-size: var(--f-xs);
+      color: var(--text-muted);
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .evidence-sha {
+      font-family: "SF Mono", "Fira Code", monospace;
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      padding: 2px 8px;
+      border-radius: 5px;
+      font-size: 11px;
+      color: var(--a1);
+    }
+
+    /* ── GENERATE FORM ─────────────────────────────────────────────── */
+    .tab-bar {
+      display: flex;
+      gap: 4px;
+      background: rgba(255,255,255,0.03);
+      border: 1px solid var(--border);
+      border-radius: var(--r-lg);
+      padding: 4px;
+      margin-bottom: 20px;
+    }
+
+    .tab-btn {
+      flex: 1;
+      background: transparent;
+      border: none;
+      color: var(--text-muted);
+      font-size: var(--f-sm);
+      font-weight: 500;
+      padding: 8px 12px;
+      border-radius: 10px;
+      cursor: pointer;
+      transition: all 0.2s cubic-bezier(0.25,1,0.5,1);
+      font-family: inherit;
+    }
+
+    .tab-btn:hover:not(.active) {
+      color: var(--text);
+      background: var(--surface-2);
+    }
+
+    .tab-btn.active {
+      background: linear-gradient(135deg, var(--a1), var(--a2));
+      color: #fff;
+      box-shadow: 0 2px 14px var(--a-glow);
+    }
+
+    input, textarea, select {
+      width: 100%;
+      background: rgba(255,255,255,0.04);
+      border: 1px solid var(--border);
+      border-radius: var(--r);
+      color: var(--text);
+      font-size: var(--f-sm);
+      padding: 10px 14px;
+      margin: 6px 0;
+      outline: none;
+      transition: all 0.2s;
+      font-family: inherit;
+    }
+
+    input:focus, textarea:focus, select:focus {
+      border-color: var(--a1);
+      background: rgba(91,127,255,0.06);
+      box-shadow: 0 0 0 3px rgba(91,127,255,0.12);
+    }
+
+    input::placeholder, textarea::placeholder { color: var(--text-muted); }
+    textarea { height: 110px; resize: vertical; }
+
+    select option { background: #0e0f1a; }
+
+    /* ── BUTTONS ───────────────────────────────────────────────────── */
+    button, .btn {
+      cursor: pointer;
+      font-family: inherit;
+      font-size: var(--f-sm);
+      font-weight: 600;
+      border-radius: var(--r);
+      padding: 9px 18px;
+      border: 1px solid var(--border);
+      background: var(--surface-2);
+      color: var(--text);
+      transition: all 0.22s cubic-bezier(0.25,1,0.5,1);
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      text-decoration: none;
+      white-space: nowrap;
+    }
+
+    button:hover, .btn:hover {
+      border-color: var(--border-hi);
+      transform: translateY(-1px);
+    }
+
+    button:active { transform: scale(0.97); }
+
+    button.primary {
+      background: linear-gradient(135deg, var(--a1), var(--a2));
+      border: none;
+      color: #fff;
+      box-shadow: 0 4px 18px var(--a-glow);
+    }
+
+    button.primary:hover {
+      box-shadow: 0 6px 28px rgba(91,127,255,0.5);
+      transform: translateY(-2px);
+    }
+
+    button.sm {
+      font-size: 11px;
+      padding: 4px 10px;
+    }
+
+    button.danger {
+      border-color: rgba(248,113,113,0.2);
+      color: var(--red);
+    }
+
+    button.danger:hover {
+      background: var(--red-dim);
+    }
+
+    /* ── DROP ZONE ─────────────────────────────────────────────────── */
+    .drop {
+      border: 1px dashed rgba(255,255,255,0.10);
+      border-radius: var(--r-xl);
+      padding: 40px 24px;
+      text-align: center;
+      color: var(--text-muted);
+      cursor: pointer;
+      margin: 8px 0;
+      transition: all 0.25s cubic-bezier(0.25,1,0.5,1);
+      background: var(--surface-3);
+    }
+
+    .drop:hover, .drop.drag-over {
+      border-color: var(--a1);
+      background: var(--a-dim);
+      color: var(--text);
+    }
+
+    .drop-icon { font-size: 30px; margin-bottom: 10px; display: block; transition: transform 0.3s cubic-bezier(0.25,1,0.5,1); }
+    .drop:hover .drop-icon { transform: translateY(-5px); }
+    .drop p { font-size: var(--f-sm); }
+    .drop small { font-size: var(--f-xs); color: var(--text-muted); margin-top: 5px; display: block; }
+
+    /* ── STATUS LINE ───────────────────────────────────────────────── */
+    .status {
+      font-size: var(--f-sm);
+      color: var(--text-muted);
+      margin: 8px 0 0;
+      min-height: 20px;
+      transition: color 0.2s;
+    }
+    .status.err { color: var(--red); }
+    .status.ok  { color: var(--green); }
+
+    /* ── LOADING SKELETON ──────────────────────────────────────────── */
+    .skeleton {
+      background: linear-gradient(90deg, var(--surface) 25%, var(--surface-2) 50%, var(--surface) 75%);
+      background-size: 200% 100%;
+      animation: shimmer 1.4s infinite;
+      border-radius: var(--r);
+    }
+
+    @keyframes shimmer {
+      0%   { background-position: 200% 0; }
+      100% { background-position: -200% 0; }
+    }
+
+    /* ── SPINNER ───────────────────────────────────────────────────── */
+    .spinner {
+      width: 16px; height: 16px;
+      border: 2px solid rgba(255,255,255,0.1);
+      border-top-color: var(--a1);
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+      flex-shrink: 0;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ── EMPTY STATE ───────────────────────────────────────────────── */
+    .empty {
+      text-align: center;
+      padding: 64px 24px;
+      color: var(--text-muted);
+    }
+
+    .empty-icon { font-size: 40px; margin-bottom: 16px; opacity: 0.4; }
+    .empty h3 { font-size: var(--f-lg); font-weight: 700; color: var(--text-dim); margin-bottom: 8px; }
+    .empty p  { font-size: var(--f-sm); max-width: 340px; margin: 0 auto 20px; line-height: 1.7; }
+
+    /* ── TWO-COL GRID ──────────────────────────────────────────────── */
+    .grid-2 {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      margin-bottom: 16px;
+    }
+
+    /* ── ROW UTILS ─────────────────────────────────────────────────── */
+    .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+    .ml-auto { margin-left: auto; }
+
+    /* ── TOAST ─────────────────────────────────────────────────────── */
+    .toast-wrap {
+      position: fixed;
+      bottom: 28px;
+      right: 28px;
+      z-index: 999;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .toast {
+      background: var(--bg-2);
+      border: 1px solid var(--border-hi);
+      border-radius: var(--r-lg);
+      padding: 12px 18px;
+      font-size: var(--f-sm);
+      color: var(--text);
+      box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+      animation: toast-in 0.35s cubic-bezier(0.25,1,0.5,1) both;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      max-width: 340px;
+    }
+
+    @keyframes toast-in {
+      from { opacity: 0; transform: translateY(14px) scale(0.96); }
+      to   { opacity: 1; transform: translateY(0) scale(1); }
+    }
+
+    /* ── RESPONSIVE ────────────────────────────────────────────────── */
+    @media (max-width: 860px) {
+      .shell { grid-template-columns: 1fr; }
+      .nav { display: none; }
+      .main { padding: 20px 16px 60px; }
+      .metric-grid { grid-template-columns: repeat(2, 1fr); }
+      .grid-2 { grid-template-columns: 1fr; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+    }
   </style>
 </head>
 <body>
-  <h1>ACE</h1>
-  <p class="muted">Upload your infrastructure → one click → auditor-ready threat model + compliance dashboard.
-     AI threats start as <b>pending</b> until you approve them.</p>
-  <div id="authbar"></div>
 
-  <div class="card">
-    <div class="row">
-      <button class="primary" id="btnTabFile">Upload Config (One-Click)</button>
-      <button id="btnTabText">Describe Manually</button>
-      <button id="btnTabGithub">Import from GitHub</button>
-    </div>
-    <div id="tab-file">
-      <input id="fname" class="full" placeholder="Project name" maxlength="200">
-      <div class="drop" id="drop">Drop a Terraform / Kubernetes / Dockerfile / docker-compose file here, or click to select
-        <input type="file" id="fileInput" style="display:none">
+<!-- Ambient -->
+<div class="ambient">
+  <div class="orb orb-1"></div>
+  <div class="orb orb-2"></div>
+  <div class="orb orb-3"></div>
+</div>
+<div class="dot-grid"></div>
+
+<div class="shell">
+
+  <!-- ── SIDEBAR ─────────────────────────────────────────────────── -->
+  <nav class="nav">
+    <div class="nav-logo">
+      <!-- Signature element: SVG hexagon mark rendered inline -->
+      <svg class="logo-hex" viewBox="0 0 34 34" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <linearGradient id="hg" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stop-color="#5b7fff"/>
+            <stop offset="100%" stop-color="#8b5cf6"/>
+          </linearGradient>
+          <filter id="glow">
+            <feGaussianBlur stdDeviation="2" result="blur"/>
+            <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+          </filter>
+        </defs>
+        <path d="M17 2L30 9.5V24.5L17 32L4 24.5V9.5L17 2Z"
+              fill="url(#hg)" opacity="0.15"/>
+        <path d="M17 2L30 9.5V24.5L17 32L4 24.5V9.5L17 2Z"
+              stroke="url(#hg)" stroke-width="1.2" filter="url(#glow)"/>
+        <path d="M17 8l7 4v8l-7 4-7-4v-8l7-4z"
+              fill="url(#hg)" opacity="0.7"/>
+      </svg>
+      <div class="logo-text">
+        <div class="logo-name">ACE</div>
+        <div class="logo-sub">Cybersecurity Engine</div>
       </div>
-      <p class="muted" id="fstatus"></p>
     </div>
-    <div id="tab-text" style="display:none">
-      <input id="name" class="full" placeholder="Project name" maxlength="200">
-      <textarea id="desc" placeholder="Describe your system architecture..." maxlength="8000"></textarea>
-      <button class="primary" id="btnDemo">Generate (Free Demo)</button>
-      <button id="saveBtn">Sign in to Save + Review</button>
+
+    <div class="nav-section">Workspace</div>
+
+    <div class="nav-item active" data-page="overview">
+      <svg class="nav-icon" viewBox="0 0 15 15" fill="none">
+        <rect x="1" y="1" width="5.5" height="5.5" rx="1" stroke="currentColor" stroke-width="1.2"/>
+        <rect x="8.5" y="1" width="5.5" height="5.5" rx="1" stroke="currentColor" stroke-width="1.2"/>
+        <rect x="1" y="8.5" width="5.5" height="5.5" rx="1" stroke="currentColor" stroke-width="1.2"/>
+        <rect x="8.5" y="8.5" width="5.5" height="5.5" rx="1" stroke="currentColor" stroke-width="1.2"/>
+      </svg>
+      Overview
     </div>
-    <div id="tab-github" style="display:none">
-      <input id="ghname" class="full" placeholder="Project name" maxlength="200">
-      <input id="ghurl" class="full" placeholder="https://github.com/owner/repo" maxlength="300">
-      <button class="primary" id="btnGithub">Import + Analyze</button>
-      <p class="muted" id="ghstatus"></p>
+
+    <div class="nav-item" data-page="roles">
+      <svg class="nav-icon" viewBox="0 0 15 15" fill="none">
+        <circle cx="7.5" cy="5" r="2.5" stroke="currentColor" stroke-width="1.2"/>
+        <path d="M2 13c0-3 2.5-4.5 5.5-4.5S13 10 13 13" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
+      </svg>
+      IAM Roles
+      <span class="nav-pill" id="nav-role-count" style="display:none">0</span>
     </div>
-  </div>
 
-  <div id="dashboard"></div>
-  <div id="results"></div>
+    <div class="nav-item" data-page="threats">
+      <svg class="nav-icon" viewBox="0 0 15 15" fill="none">
+        <path d="M7.5 1L13 4.5v6L7.5 14 2 10.5v-6L7.5 1z" stroke="currentColor" stroke-width="1.2"/>
+        <line x1="7.5" y1="5" x2="7.5" y2="8.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
+        <circle cx="7.5" cy="10.5" r="0.7" fill="currentColor"/>
+      </svg>
+      Threats
+    </div>
 
-  <footer><a href="/security.html">Security &amp; Privacy</a></footer>
+    <div class="nav-item" data-page="generate">
+      <svg class="nav-icon" viewBox="0 0 15 15" fill="none">
+        <path d="M7.5 1v13M1 7.5h13" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
+      </svg>
+      New Analysis
+    </div>
 
-  <script src="/app.js"></script>
+    <div class="nav-section">Compliance</div>
+
+    <div class="nav-item" data-page="evidence">
+      <svg class="nav-icon" viewBox="0 0 15 15" fill="none">
+        <rect x="2" y="1" width="11" height="13" rx="1.5" stroke="currentColor" stroke-width="1.2"/>
+        <line x1="5" y1="5" x2="10" y2="5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
+        <line x1="5" y1="7.5" x2="10" y2="7.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
+        <line x1="5" y1="10" x2="8" y2="10" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
+      </svg>
+      Evidence PDFs
+    </div>
+
+    <div class="nav-bottom">
+      <div class="nav-user">
+        <div class="user-avatar" id="user-initial">?</div>
+        <div>
+          <div style="font-size:12px;color:var(--text-dim);font-weight:500" id="user-email">Not signed in</div>
+          <div style="font-size:10px;color:var(--text-muted);margin-top:1px" id="sign-toggle" style="cursor:pointer">Sign in</div>
+        </div>
+      </div>
+    </div>
+  </nav>
+
+  <!-- ── MAIN ──────────────────────────────────────────────────────── -->
+  <main class="main">
+
+    <!-- OVERVIEW PAGE -->
+    <div class="page active" id="page-overview">
+      <div class="page-head">
+        <div>
+          <div class="page-eyebrow">Security Posture</div>
+          <h1 class="page-title">Overview</h1>
+          <p class="page-sub">Real-time view of your IAM threat surface and SOC2 readiness.</p>
+        </div>
+        <button class="primary" onclick="navigate('generate')">
+          <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
+            <path d="M6.5 1v11M1 6.5h11" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+          </svg>
+          New Analysis
+        </button>
+      </div>
+
+      <div class="metric-grid" id="overview-metrics">
+        <div class="metric-card skeleton" style="height:96px"></div>
+        <div class="metric-card skeleton" style="height:96px"></div>
+        <div class="metric-card skeleton" style="height:96px"></div>
+        <div class="metric-card skeleton" style="height:96px"></div>
+      </div>
+
+      <div class="grid-2">
+        <div class="card">
+          <div class="card-inner">
+            <div class="sec-label" style="margin-top:0">SOC2 Readiness</div>
+            <div class="readiness-wrap">
+              <div class="readiness-header">
+                <span class="readiness-label">CC6.3 Score</span>
+                <span class="readiness-pct" id="readiness-pct">—</span>
+              </div>
+              <div class="readiness-track">
+                <div class="readiness-fill" id="readiness-fill" style="width:0%"></div>
+              </div>
+              <p style="font-size:11px;color:var(--text-muted);margin-top:10px" id="readiness-sub"></p>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-inner">
+            <div class="sec-label" style="margin-top:0">Recent Activity</div>
+            <div id="activity-feed">
+              <div class="skeleton" style="height:14px;margin-bottom:10px;width:80%"></div>
+              <div class="skeleton" style="height:14px;margin-bottom:10px;width:65%"></div>
+              <div class="skeleton" style="height:14px;width:75%"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ROLES PAGE -->
+    <div class="page" id="page-roles">
+      <div class="page-head">
+        <div>
+          <div class="page-eyebrow">Sweeper Engine</div>
+          <h1 class="page-title">IAM Roles</h1>
+          <p class="page-sub">Cooling-off countdowns and state for every tracked role. PRs open automatically after 14 days of confirmed dormancy.</p>
+        </div>
+        <button onclick="loadRoles()">
+          <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
+            <path d="M11.5 6.5A5 5 0 1 1 6.5 1.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
+            <path d="M11.5 1.5v3h-3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          Refresh
+        </button>
+      </div>
+      <div id="roles-list">
+        <div class="skeleton" style="height:72px;border-radius:14px;margin-bottom:10px"></div>
+        <div class="skeleton" style="height:72px;border-radius:14px;margin-bottom:10px"></div>
+        <div class="skeleton" style="height:72px;border-radius:14px"></div>
+      </div>
+    </div>
+
+    <!-- THREATS PAGE -->
+    <div class="page" id="page-threats">
+      <div class="page-head">
+        <div>
+          <div class="page-eyebrow">STRIDE Analysis</div>
+          <h1 class="page-title">Threats</h1>
+          <p class="page-sub">All identified IAM threats across your projects, mapped to SOC2 controls.</p>
+        </div>
+        <div class="row">
+          <select id="threat-project-filter" onchange="loadThreats()" style="width:auto;margin:0;font-size:12px;">
+            <option value="">All projects</option>
+          </select>
+          <button onclick="loadThreats()">Refresh</button>
+        </div>
+      </div>
+      <div id="threats-list">
+        <div class="skeleton" style="height:120px;border-radius:14px;margin-bottom:10px"></div>
+        <div class="skeleton" style="height:120px;border-radius:14px;margin-bottom:10px"></div>
+      </div>
+    </div>
+
+    <!-- GENERATE PAGE -->
+    <div class="page" id="page-generate">
+      <div class="page-head">
+        <div>
+          <div class="page-eyebrow">Threat Intelligence</div>
+          <h1 class="page-title">New Analysis</h1>
+          <p class="page-sub">Upload infrastructure or describe your architecture. ACE identifies STRIDE threats and maps them to SOC2 controls.</p>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-inner">
+          <div class="tab-bar">
+            <button class="tab-btn active" data-tab="file">Upload Config</button>
+            <button class="tab-btn" data-tab="text">Describe Manually</button>
+            <button class="tab-btn" data-tab="github">Import from GitHub</button>
+          </div>
+
+          <div id="gtab-file">
+            <input id="g-fname" placeholder="Project name" maxlength="200">
+            <div class="drop" id="drop-zone">
+              <span class="drop-icon">⬆</span>
+              <p>Drop a Terraform, HCL, YAML, or Dockerfile here</p>
+              <small>.tf .hcl .yaml .yml .json .txt · max 100KB</small>
+              <input type="file" id="file-input" style="display:none">
+            </div>
+            <p class="status" id="file-status"></p>
+          </div>
+
+          <div id="gtab-text" style="display:none">
+            <input id="g-name" placeholder="Project name" maxlength="200">
+            <textarea id="g-desc" placeholder="Describe your system architecture, AWS services, and IAM roles..." maxlength="8000"></textarea>
+            <div class="row" style="margin-top:12px">
+              <button class="primary" id="btn-demo">Analyze (Free Demo)</button>
+              <button id="btn-save">Sign in to Save</button>
+            </div>
+            <p class="status" id="text-status"></p>
+          </div>
+
+          <div id="gtab-github" style="display:none">
+            <input id="g-ghname" placeholder="Project name" maxlength="200">
+            <input id="g-ghurl" placeholder="https://github.com/owner/repo" maxlength="300">
+            <button class="primary" style="margin-top:12px;width:100%" id="btn-github">
+              Import + Analyze
+            </button>
+            <p class="status" id="github-status"></p>
+          </div>
+        </div>
+      </div>
+
+      <div id="gen-results"></div>
+    </div>
+
+    <!-- EVIDENCE PAGE -->
+    <div class="page" id="page-evidence">
+      <div class="page-head">
+        <div>
+          <div class="page-eyebrow">SOC2 CC6.3</div>
+          <h1 class="page-title">Evidence PDFs</h1>
+          <p class="page-sub">Tamper-proof audit packages. Each PDF contains the threat, excess permissions, the PR, the commit SHA, and the approver's name.</p>
+        </div>
+      </div>
+      <div id="evidence-list">
+        <div class="skeleton" style="height:80px;border-radius:14px;margin-bottom:10px"></div>
+        <div class="skeleton" style="height:80px;border-radius:14px;margin-bottom:10px"></div>
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<!-- Toast container -->
+<div class="toast-wrap" id="toasts"></div>
+
+<script src="/app.js"></script>
+<script>
+/* ─── NAVIGATION ─────────────────────────────────────── */
+function navigate(page) {
+  document.querySelectorAll('.nav-item').forEach(el => {
+    el.classList.toggle('active', el.dataset.page === page);
+  });
+  document.querySelectorAll('.page').forEach(el => {
+    const active = el.id === `page-${page}`;
+    el.classList.toggle('active', active);
+  });
+  if (page === 'overview')  loadOverview();
+  if (page === 'roles')     loadRoles();
+  if (page === 'threats')   loadThreats();
+  if (page === 'evidence')  loadEvidence();
+}
+
+document.querySelectorAll('.nav-item[data-page]').forEach(el => {
+  el.addEventListener('click', () => navigate(el.dataset.page));
+});
+
+/* ─── TOAST ──────────────────────────────────────────── */
+function toast(msg, type = 'info') {
+  const colors = { ok: 'var(--green)', err: 'var(--red)', info: 'var(--a1)' };
+  const t = document.createElement('div');
+  t.className = 'toast';
+  t.innerHTML = `<span style="width:7px;height:7px;border-radius:50%;background:${colors[type]};box-shadow:0 0 8px ${colors[type]};flex-shrink:0"></span>${msg}`;
+  document.getElementById('toasts').appendChild(t);
+  setTimeout(() => t.remove(), 4000);
+}
+
+/* ─── TAB SWITCHING (generate page) ─────────────────── */
+document.querySelectorAll('.tab-btn').forEach(btn => {
+  btn.addEventListener('click', function () {
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    this.classList.add('active');
+    ['file','text','github'].forEach(t => {
+      document.getElementById(`gtab-${t}`).style.display = this.dataset.tab === t ? '' : 'none';
+    });
+  });
+});
+
+/* ─── DROP ZONE ──────────────────────────────────────── */
+const dropZone = document.getElementById('drop-zone');
+const fileInput = document.getElementById('file-input');
+const fileStatus = document.getElementById('file-status');
+
+dropZone.addEventListener('click', () => fileInput.click());
+
+dropZone.addEventListener('dragover', e => {
+  e.preventDefault();
+  dropZone.classList.add('drag-over');
+});
+
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+
+dropZone.addEventListener('drop', e => {
+  e.preventDefault();
+  dropZone.classList.remove('drag-over');
+  const file = e.dataTransfer.files[0];
+  if (file) handleFile(file);
+});
+
+fileInput.addEventListener('change', () => {
+  if (fileInput.files[0]) handleFile(fileInput.files[0]);
+});
+
+async function handleFile(file) {
+  const allowed = ['.tf','.hcl','.yaml','.yml','.json','.txt'];
+  const lower = file.name.toLowerCase();
+  const ok = lower === 'dockerfile' || lower.endsWith('dockerfile') || allowed.some(e => lower.endsWith(e));
+  if (!ok) { fileStatus.textContent = 'Unsupported file type.'; fileStatus.className = 'status err'; return; }
+  if (file.size > 100000) { fileStatus.textContent = 'File too large (max 100KB).'; fileStatus.className = 'status err'; return; }
+
+  fileStatus.innerHTML = '<span class="spinner"></span> Analyzing…';
+  fileStatus.className = 'status';
+
+  const jwt = getJwt();
+  if (!jwt) { fileStatus.textContent = 'Sign in to analyze files.'; fileStatus.className = 'status err'; return; }
+
+  const fd = new FormData();
+  fd.append('file', file);
+  const name = document.getElementById('g-fname').value.trim() || file.name;
+
+  try {
+    const r = await fetch(`/api/generate-from-file?name=${encodeURIComponent(name)}`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${jwt}` },
+      body: fd,
+    });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail || 'Analysis failed.');
+    fileStatus.textContent = `✓ ${data.threat_model.threats.length} threats found`;
+    fileStatus.className = 'status ok';
+    renderThreats(data.threat_model, data.project_id, 'gen-results');
+    toast(`Analysis complete — ${data.threat_model.threats.length} threats found`, 'ok');
+  } catch (e) {
+    fileStatus.textContent = e.message;
+    fileStatus.className = 'status err';
+    toast(e.message, 'err');
+  }
+}
+
+/* ─── DEMO / SAVE ────────────────────────────────────── */
+document.getElementById('btn-demo').addEventListener('click', async () => {
+  const desc = document.getElementById('g-desc').value.trim();
+  const st = document.getElementById('text-status');
+  if (!desc) { st.textContent = 'Describe your system first.'; st.className = 'status err'; return; }
+
+  st.innerHTML = '<span class="spinner"></span> Analyzing…';
+  st.className = 'status';
+
+  try {
+    const r = await fetch('/api/demo', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: 'Demo', architecture_description: desc }),
+    });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail);
+    st.textContent = `✓ ${data.threat_model.threats.length} threats found`;
+    st.className = 'status ok';
+    renderThreats(data.threat_model, null, 'gen-results');
+  } catch (e) {
+    st.textContent = e.message;
+    st.className = 'status err';
+  }
+});
+
+document.getElementById('btn-github').addEventListener('click', async () => {
+  const url = document.getElementById('g-ghurl').value.trim();
+  const name = document.getElementById('g-ghname').value.trim() || 'GitHub Import';
+  const st = document.getElementById('github-status');
+  const jwt = getJwt();
+  if (!jwt) { st.textContent = 'Sign in to use GitHub import.'; st.className = 'status err'; return; }
+  if (!url) { st.textContent = 'Enter a GitHub repo URL.'; st.className = 'status err'; return; }
+
+  st.innerHTML = '<span class="spinner"></span> Importing…';
+  st.className = 'status';
+
+  try {
+    const r = await fetch('/api/generate-from-github', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${jwt}` },
+      body: JSON.stringify({ name, repo_url: url }),
+    });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail);
+    st.textContent = `✓ ${data.threat_model.threats.length} threats found`;
+    st.className = 'status ok';
+    renderThreats(data.threat_model, data.project_id, 'gen-results');
+    toast('Import complete', 'ok');
+  } catch (e) {
+    st.textContent = e.message;
+    st.className = 'status err';
+    toast(e.message, 'err');
+  }
+});
+
+/* ─── RENDER THREATS ─────────────────────────────────── */
+function renderThreats(model, pid, containerId) {
+  const el = document.getElementById(containerId);
+  if (!model || !model.threats || !model.threats.length) {
+    el.innerHTML = `<div class="empty"><div class="empty-icon">🛡️</div><h3>No threats found</h3><p>No STRIDE threats were identified in this architecture.</p></div>`;
+    return;
+  }
+
+  const sev = s => ({'Critical':'critical','High':'high','Medium':'medium','Low':'low'}[s]||'low');
+
+  const cards = model.threats.map((t, i) => `
+    <div class="threat-card ${sev(t.severity)}" style="animation-delay:${i*50}ms">
+      <div class="threat-top">
+        <div class="threat-title">${esc(t.title)}</div>
+        <span class="badge ${sev(t.severity)}">${esc(t.severity)}</span>
+      </div>
+      <div class="threat-meta">
+        <span>${esc(t.category)}</span>
+        <span>•</span>
+        <span>${esc(t.affected_component)}</span>
+      </div>
+      <div class="threat-soc2">${esc(t.soc2_control)}${t.iso27001_control ? ` · ISO ${esc(t.iso27001_control)}` : ''}${t.nist_control ? ` · NIST ${esc(t.nist_control)}` : ''}</div>
+      <div class="threat-desc">${esc(t.description)}</div>
+      <ul class="threat-mitigations">
+        ${t.mitigations.slice(0,3).map(m => `<li>${esc(m.description)}</li>`).join('')}
+      </ul>
+      ${pid ? `
+      <div class="threat-actions">
+        <select class="sm" id="status-${i}" onchange="setStatus('${pid}','${i}',this.value)" style="width:auto;margin:0">
+          <option value="pending">Pending</option>
+          <option value="accepted">Accepted</option>
+          <option value="rejected">Rejected</option>
+        </select>
+        <select class="sm" id="rem-${i}" onchange="setRemediation('${pid}','${i}',this.value)" style="width:auto;margin:0">
+          <option value="not_started">Not started</option>
+          <option value="in_progress">In progress</option>
+          <option value="resolved">Resolved</option>
+        </select>
+      </div>` : ''}
+    </div>
+  `).join('');
+
+  el.innerHTML = `
+    <div class="sec-label">${model.threats.length} Threat${model.threats.length !== 1 ? 's' : ''} Identified</div>
+    <div class="card card-inner" style="padding:14px;margin-bottom:16px;font-size:13px;color:var(--text-dim);line-height:1.7">${esc(model.system_summary)}</div>
+    ${cards}
+  `;
+
+  // Stagger animate
+  el.querySelectorAll('.threat-card').forEach((c, i) => {
+    c.style.opacity = '0';
+    c.style.transform = 'translateY(10px)';
+    setTimeout(() => {
+      c.style.transition = 'opacity 0.35s ease, transform 0.35s cubic-bezier(0.25,1,0.5,1)';
+      c.style.opacity = '';
+      c.style.transform = '';
+    }, i * 55);
+  });
+}
+
+/* ─── LOAD OVERVIEW ──────────────────────────────────── */
+async function loadOverview() {
+  const jwt = getJwt();
+  if (!jwt) {
+    document.getElementById('overview-metrics').innerHTML = `
+      <div class="metric-card" style="grid-column:1/-1">
+        <div class="empty"><div class="empty-icon">🔐</div><h3>Sign in to view your dashboard</h3><p>Use the account at the bottom of the sidebar to authenticate.</p></div>
+      </div>`;
+    return;
+  }
+
+  try {
+    const [projectsRes, rolesRes] = await Promise.all([
+      fetch('/api/projects', { headers: { Authorization: `Bearer ${jwt}` } }),
+      fetch('/api/ace/sweeper-status', { headers: { Authorization: `Bearer ${jwt}` } }),
+    ]);
+
+    const projects = projectsRes.ok ? await projectsRes.json() : { projects: [] };
+    const rolesData = rolesRes.ok ? await rolesRes.json() : { roles: [] };
+
+    const roles = rolesData.roles || [];
+    const pending = roles.filter(r => r.state === 'PENDING_REDUCTION').length;
+    const open    = roles.filter(r => r.state === 'PR_OPEN').length;
+    const active  = roles.filter(r => r.state === 'ACTIVE').length;
+    const total   = roles.length;
+
+    const pcts  = total > 0 ? Math.round((active / total) * 100) : 100;
+    const plist = (projects.projects || []);
+
+    document.getElementById('overview-metrics').innerHTML = `
+      <div class="metric-card">
+        <div class="metric-label">Projects</div>
+        <div class="metric-value accent">${plist.length}</div>
+        <div class="metric-delta">Total analyzed</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-label">Roles Tracked</div>
+        <div class="metric-value">${total}</div>
+        <div class="metric-delta">${active} active, ${pending} pending</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-label">Open PRs</div>
+        <div class="metric-value ${open > 0 ? 'yellow' : 'green'}">${open}</div>
+        <div class="metric-delta">Awaiting merge</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-label">Pending Review</div>
+        <div class="metric-value ${pending > 0 ? 'red' : 'green'}">${pending}</div>
+        <div class="metric-delta">In cooling-off</div>
+      </div>
+    `;
+
+    document.getElementById('readiness-pct').textContent = `${pcts}%`;
+    document.getElementById('readiness-fill').style.width = `${pcts}%`;
+    document.getElementById('readiness-sub').textContent =
+      pcts === 100 ? 'All tracked roles are active — no dormancy detected.' :
+      `${total - active} role${total - active !== 1 ? 's' : ''} need attention before your audit.`;
+
+    // Update nav badge
+    const navCount = document.getElementById('nav-role-count');
+    if (pending > 0) {
+      navCount.textContent = pending;
+      navCount.style.display = '';
+    } else {
+      navCount.style.display = 'none';
+    }
+
+    // Activity feed
+    const feedItems = [
+      ...(pending > 0 ? [{ color: 'yellow', text: `${pending} role${pending!==1?'s':''} in cooling-off period`, time: 'Now' }] : []),
+      ...(open > 0    ? [{ color: 'blue',   text: `${open} permission reduction PR${open!==1?'s':''} open`,     time: 'Active' }] : []),
+      ...(plist.length > 0 ? [{ color: 'green', text: `${plist.length} project${plist.length!==1?'s':''} analyzed`, time: 'Up to date' }] : []),
+      { color: 'blue', text: 'ACE sweeper running', time: 'Continuous' },
+    ];
+
+    document.getElementById('activity-feed').innerHTML = feedItems.slice(0,4).map(f => `
+      <div class="feed-item">
+        <div class="feed-dot ${f.color}"></div>
+        <div>
+          <div class="feed-text">${f.text}</div>
+          <div class="feed-time">${f.time}</div>
+        </div>
+      </div>
+    `).join('') || '<p style="font-size:13px;color:var(--text-muted)">No recent activity.</p>';
+
+  } catch (e) {
+    toast('Could not load overview: ' + e.message, 'err');
+  }
+}
+
+/* ─── LOAD ROLES ─────────────────────────────────────── */
+async function loadRoles() {
+  const jwt = getJwt();
+  const el = document.getElementById('roles-list');
+
+  if (!jwt) {
+    el.innerHTML = `<div class="empty"><div class="empty-icon">🔐</div><h3>Sign in to view roles</h3></div>`;
+    return;
+  }
+
+  el.innerHTML = `
+    <div class="skeleton" style="height:72px;border-radius:14px;margin-bottom:10px"></div>
+    <div class="skeleton" style="height:72px;border-radius:14px;margin-bottom:10px"></div>
+    <div class="skeleton" style="height:72px;border-radius:14px"></div>
+  `;
+
+  try {
+    const r = await fetch('/api/ace/sweeper-status', { headers: { Authorization: `Bearer ${jwt}` } });
+    const data = await r.json();
+    const roles = data.roles || [];
+
+    if (!roles.length) {
+      el.innerHTML = `<div class="empty"><div class="empty-icon">✅</div><h3>No roles tracked yet</h3><p>Run <code>ace analyze</code> in your CI pipeline to start monitoring IAM roles.</p></div>`;
+      return;
+    }
+
+    const stateClass = s => ({
+      'ACTIVE': 'active', 'PENDING_REDUCTION': 'pending',
+      'REDUCTION_READY': 'ready', 'PR_OPEN': 'pr'
+    }[s] || 'active');
+
+    const stateLabel = s => ({
+      'ACTIVE': 'Active', 'PENDING_REDUCTION': 'Pending',
+      'REDUCTION_READY': 'Reduction Ready', 'PR_OPEN': 'PR Open'
+    }[s] || s);
+
+    el.innerHTML = roles.map((role, i) => `
+      <div class="role-card state-${stateClass(role.state)}" style="animation-delay:${i*40}ms">
+        <div>
+          <div class="role-name">${esc(role.role_name || role.role_arn)}</div>
+          <div class="role-repo">${esc(role.repo || '—')}</div>
+        </div>
+        <div class="role-right">
+          <div><span class="state-pill ${stateClass(role.state)}">${stateLabel(role.state)}</span></div>
+          ${role.state === 'PENDING_REDUCTION' && role.days_until_pr !== null ?
+            `<div class="countdown">PR opens in <b>${role.days_until_pr}d</b></div>` :
+            role.state === 'PR_OPEN' && role.pr_url ?
+            `<a href="${esc(role.pr_url)}" target="_blank" class="btn sm" style="margin-top:4px">View PR →</a>` : ''}
+        </div>
+      </div>
+    `).join('');
+
+    el.querySelectorAll('.role-card').forEach((c, i) => {
+      c.style.opacity = '0';
+      c.style.transform = 'translateX(-8px)';
+      setTimeout(() => {
+        c.style.transition = 'opacity 0.3s ease, transform 0.3s cubic-bezier(0.25,1,0.5,1)';
+        c.style.opacity = '';
+        c.style.transform = '';
+      }, i * 45);
+    });
+
+  } catch (e) {
+    el.innerHTML = `<div class="empty"><div class="empty-icon">⚠️</div><h3>Could not load roles</h3><p>${e.message}</p></div>`;
+  }
+}
+
+/* ─── LOAD THREATS ───────────────────────────────────── */
+async function loadThreats() {
+  const jwt = getJwt();
+  const el = document.getElementById('threats-list');
+  if (!jwt) {
+    el.innerHTML = `<div class="empty"><div class="empty-icon">🔐</div><h3>Sign in to view threats</h3></div>`;
+    return;
+  }
+
+  el.innerHTML = `<div class="skeleton" style="height:120px;border-radius:14px;margin-bottom:10px"></div><div class="skeleton" style="height:120px;border-radius:14px"></div>`;
+
+  try {
+    const r = await fetch('/api/projects', { headers: { Authorization: `Bearer ${jwt}` } });
+    const data = await r.json();
+    const projects = data.projects || [];
+
+    // Populate project filter
+    const sel = document.getElementById('threat-project-filter');
+    const existing = Array.from(sel.options).map(o => o.value);
+    projects.forEach(p => {
+      if (!existing.includes(p.id)) {
+        const o = document.createElement('option');
+        o.value = p.id;
+        o.textContent = p.name;
+        sel.appendChild(o);
+      }
+    });
+
+    const filterPid = sel.value;
+    const filtered = filterPid ? projects.filter(p => p.id === filterPid) : projects;
+
+    if (!filtered.length) {
+      el.innerHTML = `<div class="empty"><div class="empty-icon">🛡️</div><h3>No projects yet</h3><p>Run a new analysis to start finding threats.</p><button class="primary" onclick="navigate('generate')">New Analysis</button></div>`;
+      return;
+    }
+
+    // Gather all threats across projects
+    const allThreats = [];
+    await Promise.all(filtered.map(async p => {
+      const r2 = await fetch(`/api/projects/${p.id}`, { headers: { Authorization: `Bearer ${jwt}` } });
+      const d2 = await r2.json();
+      (d2.threats || []).forEach(t => allThreats.push({ ...t, _project: p.name, _pid: p.id }));
+    }));
+
+    if (!allThreats.length) {
+      el.innerHTML = `<div class="empty"><div class="empty-icon">✅</div><h3>No threats found</h3><p>Run a new analysis to identify STRIDE threats in your infrastructure.</p></div>`;
+      return;
+    }
+
+    const sev = s => ({'Critical':'critical','High':'high','Medium':'medium','Low':'low'}[s]||'low');
+
+    el.innerHTML = allThreats.map((t, i) => `
+      <div class="threat-card ${sev(t.severity)}" style="animation-delay:${i*45}ms">
+        <div class="threat-top">
+          <div>
+            <div style="font-size:10px;color:var(--text-muted);margin-bottom:4px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase">${esc(t._project)}</div>
+            <div class="threat-title">${esc(t.title)}</div>
+          </div>
+          <div style="display:flex;flex-direction:column;align-items:flex-end;gap:5px">
+            <span class="badge ${sev(t.severity)}">${esc(t.severity)}</span>
+            <span class="badge ${t.status||'pending'}">${esc(t.status||'pending')}</span>
+          </div>
+        </div>
+        <div class="threat-meta">
+          <span>${esc(t.category)}</span><span>•</span><span>${esc(t.affected_component)}</span>
+        </div>
+        <div class="threat-soc2">${esc(t.soc2_control)}</div>
+        <div class="threat-desc">${esc(t.description)}</div>
+        <div class="threat-actions">
+          <select class="sm" onchange="setThreatStatus('${t.id}',this.value)" style="width:auto;margin:0">
+            <option value="pending"   ${t.status==='pending'?'selected':''}>Pending</option>
+            <option value="accepted"  ${t.status==='accepted'?'selected':''}>Accepted</option>
+            <option value="rejected"  ${t.status==='rejected'?'selected':''}>Rejected</option>
+          </select>
+          <select class="sm" onchange="setThreatRemediation('${t.id}',this.value)" style="width:auto;margin:0">
+            <option value="not_started"  ${t.remediation_status==='not_started'?'selected':''}>Not started</option>
+            <option value="in_progress"  ${t.remediation_status==='in_progress'?'selected':''}>In progress</option>
+            <option value="resolved"     ${t.remediation_status==='resolved'?'selected':''}>Resolved</option>
+          </select>
+        </div>
+      </div>
+    `).join('');
+
+    el.querySelectorAll('.threat-card').forEach((c, i) => {
+      c.style.opacity = '0';
+      c.style.transform = 'translateY(10px)';
+      setTimeout(() => {
+        c.style.transition = 'opacity 0.35s ease, transform 0.35s cubic-bezier(0.25,1,0.5,1)';
+        c.style.opacity = '';
+        c.style.transform = '';
+      }, i * 50);
+    });
+
+  } catch (e) {
+    el.innerHTML = `<div class="empty"><div class="empty-icon">⚠️</div><h3>Could not load threats</h3><p>${e.message}</p></div>`;
+  }
+}
+
+/* ─── LOAD EVIDENCE ──────────────────────────────────── */
+async function loadEvidence() {
+  const jwt = getJwt();
+  const el = document.getElementById('evidence-list');
+  if (!jwt) {
+    el.innerHTML = `<div class="empty"><div class="empty-icon">🔐</div><h3>Sign in to view evidence</h3></div>`;
+    return;
+  }
+
+  el.innerHTML = `<div class="skeleton" style="height:80px;border-radius:14px;margin-bottom:10px"></div><div class="skeleton" style="height:80px;border-radius:14px"></div>`;
+
+  try {
+    const r = await fetch('/api/projects', { headers: { Authorization: `Bearer ${jwt}` } });
+    const data = await r.json();
+    const projects = data.projects || [];
+
+    if (!projects.length) {
+      el.innerHTML = `<div class="empty"><div class="empty-icon">📋</div><h3>No projects yet</h3><p>Run an analysis and complete IAM remediation to generate evidence PDFs.</p><button class="primary" onclick="navigate('generate')">New Analysis</button></div>`;
+      return;
+    }
+
+    el.innerHTML = projects.map((p, i) => `
+      <div class="evidence-card" style="animation-delay:${i*50}ms">
+        <div>
+          <div class="evidence-name">${esc(p.name)}</div>
+          <div class="evidence-meta">
+            <span>CC6.3 Evidence Package</span>
+            <span>•</span>
+            <span>${esc(p.created_at ? new Date(p.created_at).toLocaleDateString() : 'Unknown date')}</span>
+          </div>
+        </div>
+        <div class="row">
+          <button class="sm" onclick="downloadEvidence('${p.id}','${esc(p.name)}')">
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+              <path d="M6 1v7M3 5.5l3 3 3-3M1.5 10h9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            Download PDF
+          </button>
+        </div>
+      </div>
+    `).join('');
+
+    el.querySelectorAll('.evidence-card').forEach((c, i) => {
+      c.style.opacity = '0';
+      c.style.transform = 'translateY(8px)';
+      setTimeout(() => {
+        c.style.transition = 'opacity 0.3s ease, transform 0.3s cubic-bezier(0.25,1,0.5,1)';
+        c.style.opacity = '';
+        c.style.transform = '';
+      }, i * 50);
+    });
+
+  } catch (e) {
+    el.innerHTML = `<div class="empty"><div class="empty-icon">⚠️</div><h3>Could not load projects</h3><p>${e.message}</p></div>`;
+  }
+}
+
+async function downloadEvidence(pid, name) {
+  const jwt = getJwt();
+  if (!jwt) { toast('Sign in first', 'err'); return; }
+  toast('Generating PDF…', 'info');
+  try {
+    const r = await fetch(`/api/projects/${pid}/evidence-pdf`, { headers: { Authorization: `Bearer ${jwt}` } });
+    if (!r.ok) {
+      const d = await r.json();
+      throw new Error(d.detail || 'PDF generation failed');
+    }
+    const blob = await r.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `ace-evidence-${name.toLowerCase().replace(/\s+/g,'-')}.pdf`;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast('PDF downloaded', 'ok');
+  } catch (e) {
+    toast(e.message, 'err');
+  }
+}
+
+/* ─── STATUS UPDATES ─────────────────────────────────── */
+async function setThreatStatus(tid, status) {
+  const jwt = getJwt();
+  if (!jwt) return;
+  try {
+    const r = await fetch(`/api/threats/${tid}/status`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${jwt}` },
+      body: JSON.stringify({ status }),
+    });
+    if (!r.ok) throw new Error('Update failed');
+    toast(`Status set to ${status}`, 'ok');
+  } catch (e) { toast(e.message, 'err'); }
+}
+
+async function setThreatRemediation(tid, status) {
+  const jwt = getJwt();
+  if (!jwt) return;
+  try {
+    const r = await fetch(`/api/threats/${tid}/remediation`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${jwt}` },
+      body: JSON.stringify({ status }),
+    });
+    if (!r.ok) throw new Error('Update failed');
+    toast(`Remediation: ${status.replace(/_/g,' ')}`, 'ok');
+  } catch (e) { toast(e.message, 'err'); }
+}
+
+/* ─── AUTH ───────────────────────────────────────────── */
+function getJwt() {
+  const s = window._supaSession;
+  return s ? s.access_token : null;
+}
+
+// Auth is handled by app.js — expose callback for when session changes
+window._onSessionChange = function(session) {
+  if (session) {
+    const email = session.user?.email || '';
+    document.getElementById('user-email').textContent = email;
+    document.getElementById('user-initial').textContent = email[0]?.toUpperCase() || '?';
+    document.getElementById('sign-toggle').textContent = 'Sign out';
+    document.getElementById('sign-toggle').onclick = () => window._supaSignOut?.();
+    loadOverview();
+  } else {
+    document.getElementById('user-email').textContent = 'Not signed in';
+    document.getElementById('user-initial').textContent = '?';
+    document.getElementById('sign-toggle').textContent = 'Sign in';
+    document.getElementById('sign-toggle').onclick = () => window._supaSignIn?.();
+  }
+};
+
+/* ─── UTILS ──────────────────────────────────────────── */
+function esc(s) {
+  if (s === null || s === undefined) return '';
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+/* ─── MAGNETIC BUTTONS ───────────────────────────────── */
+document.querySelectorAll('button.primary').forEach(btn => {
+  btn.addEventListener('mousemove', e => {
+    const r = btn.getBoundingClientRect();
+    const x = e.clientX - r.left - r.width  / 2;
+    const y = e.clientY - r.top  - r.height / 2;
+    btn.style.transform = `translate(${x * 0.10}px, ${y * 0.10 - 2}px)`;
+  });
+  btn.addEventListener('mouseleave', () => { btn.style.transform = ''; });
+});
+
+/* ─── INIT ───────────────────────────────────────────── */
+loadOverview();
+</script>
 </body>
 </html>
