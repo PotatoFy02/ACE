@@ -113,7 +113,7 @@ async def hardening(request: Request, call_next):
     resp.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
     resp.headers["Content-Security-Policy"] = (
         "default-src 'self'; "
-        "script-src 'self' https://cdn.jsdelivr.net; "
+        "script-src 'self' https://cdn.jsdelivr.net 'unsafe-inline'; "
         "style-src 'self' 'unsafe-inline'; "
         "connect-src 'self' https://*.supabase.co; "
         "frame-ancestors 'none'"
