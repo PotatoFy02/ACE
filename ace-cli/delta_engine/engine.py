@@ -10,6 +10,9 @@ from schemas.models import (
 from delta_engine.severity_map import get_severity
 from delta_engine.matcher import match_rpm_to_gpm
 
+import logging
+log = logging.getLogger("delta_engine")
+
 
 def _has_low_confidence(rpm: RPM) -> bool:
     return any(c.confidence == Confidence.LOW for c in rpm.sdk_calls)
@@ -70,6 +73,17 @@ def compute_delta(
     """
     Main entry point. Pairs one RPM with one GPM, computes P_excess.
     Checks manifest first, fuzzy match as fallback.
+
+    EMPTY-RPM CIRCUIT BREAKER:
+    If the RPM has no detected actions but the GPM has granted permissions,
+    we cannot safely compute what is excess. This happens when code uses
+    indirect boto3 patterns — pandas.read_parquet('s3://...'), boto3.resource(),
+    paginators, waiters, wrapper classes, or third-party libraries that call
+    boto3 internally. In all these cases the static parser sees nothing, RPM=∅,
+    and without this check the delta engine would conclude every granted
+    permission is excess and generate a patch that removes all of them.
+    The requires_human_review flag would NOT fire under the old logic because
+    nothing looked uncertain — the parser was confidently wrong.
     """
     gpm, match_method = match_rpm_to_gpm(rpm, gpms, manifest)
 
@@ -87,6 +101,35 @@ def compute_delta(
 
     required = _get_required_actions(rpm)
     granted = _get_granted_actions(gpm)
+
+    # ── Empty-RPM circuit breaker ──────────────────────────────────────────
+    # If static analysis found zero IAM actions but AWS has granted permissions,
+    # the parser's view is incomplete. Common causes: pandas/s3fs/awswrangler
+    # using boto3 internally, boto3.resource() API, paginators, waiters,
+    # wrapper classes that hide the actual SDK call, copy_object (needs perms
+    # on two resources), KMS-encrypted S3 (needs kms:Decrypt alongside s3:*).
+    # Never generate a "remove everything" patch from an empty RPM.
+    if not required and granted:
+        log.warning(
+            "EMPTY-RPM circuit breaker fired for role %s — "
+            "no SDK calls detected but %d permissions are granted. "
+            "Possible indirect boto3 usage (pandas/s3fs/wrapper/other language). "
+            "Forcing human review.",
+            gpm.role_arn,
+            len(granted),
+        )
+        return DeltaResult(
+            role_arn=gpm.role_arn,
+            role_name=gpm.role_name,
+            commit_sha=rpm.commit_sha,
+            matched_by=match_method,
+            rpm_service_name=rpm.service_name,
+            excess=[],
+            requires_human_review=True,
+            patch_risk="yellow",
+        )
+    # ── End circuit breaker ────────────────────────────────────────────────
+
     excess_actions = granted - required
 
     entries: list[DeltaEntry] = []
@@ -102,7 +145,11 @@ def compute_delta(
 
     entries.extend(_get_resource_scope_violations(rpm, gpm))
 
-    requires_review = _has_low_confidence(rpm) or match_method == MatchMethod.AMBIGUOUS
+    requires_review = (
+        _has_low_confidence(rpm)
+        or match_method == MatchMethod.AMBIGUOUS
+        or gpm.requires_human_review
+    )
 
     if not entries:
         patch_risk = "green"

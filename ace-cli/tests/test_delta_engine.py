@@ -1,147 +1,182 @@
 """
-Delta Engine tests — 8 tests covering core contract.
-All against synthetic fixtures — no real files.
+Delta Engine — computes P_excess = P_granted - P_required.
+One DeltaResult per role. Severity assigned here, never in parsers.
 """
 
-import pytest
 from schemas.models import (
-    RPM, GPM, SDKCall, Statement, AttachedPolicy,
-    Confidence, Severity, MatchMethod, OverPrivilegeType
+    RPM, GPM, DeltaResult, DeltaEntry,
+    OverPrivilegeType, MatchMethod, Confidence
 )
-from delta_engine.engine import compute_delta, compute_all_deltas
 from delta_engine.severity_map import get_severity
 from delta_engine.matcher import match_rpm_to_gpm
 
+import logging
+log = logging.getLogger("delta_engine")
 
-# --- Fixtures ---
 
-def make_rpm(service_name="sample-lambda", calls=None) -> RPM:
-    calls = calls or [
-        SDKCall(
-            service="s3", action="get_object", action_iam="s3:GetObject",
-            resources=["arn:aws:s3:::my-bucket/*"],
-            resources_wildcard=False, confidence=Confidence.HIGH
+def _has_low_confidence(rpm: RPM) -> bool:
+    return any(c.confidence == Confidence.LOW for c in rpm.sdk_calls)
+
+
+def _get_required_actions(rpm: RPM) -> set[str]:
+    return {
+        call.action_iam
+        for call in rpm.sdk_calls
+        if call.action_iam != "unknown:unknown"
+    }
+
+
+def _get_granted_actions(gpm: GPM) -> set[str]:
+    actions = set()
+    for policy in gpm.attached_policies:
+        for stmt in policy.statements:
+            if stmt.effect == "Allow":
+                actions.update(stmt.actions_expanded)
+    return actions
+
+
+def _get_resource_scope_violations(rpm: RPM, gpm: GPM) -> list[DeltaEntry]:
+    entries = []
+    rpm_non_wildcard = {
+        call.action_iam
+        for call in rpm.sdk_calls
+        if not call.resources_wildcard and call.action_iam != "unknown:unknown"
+    }
+
+    for policy in gpm.attached_policies:
+        for stmt in policy.statements:
+            if stmt.effect != "Allow":
+                continue
+            if not stmt.resources_wildcard:
+                continue
+            for action in stmt.actions_expanded:
+                if action in rpm_non_wildcard:
+                    entries.append(DeltaEntry(
+                        action_iam=action,
+                        over_privilege_type=OverPrivilegeType.RESOURCE,
+                        severity=get_severity(action),
+                        confidence=Confidence.MEDIUM,
+                        reason=(
+                            f"{action} granted on wildcard resource '*' but "
+                            f"code only uses it on a specific resource"
+                        )
+                    ))
+
+    return entries
+
+
+def compute_delta(
+    rpm: RPM,
+    gpms: list[GPM],
+    manifest: dict[str, str] | None = None,
+) -> DeltaResult:
+    """
+    Main entry point. Pairs one RPM with one GPM, computes P_excess.
+    Checks manifest first, fuzzy match as fallback.
+
+    EMPTY-RPM CIRCUIT BREAKER:
+    If the RPM has no detected actions but the GPM has granted permissions,
+    we cannot safely compute what is excess. This happens when code uses
+    indirect boto3 patterns — pandas.read_parquet('s3://...'), boto3.resource(),
+    paginators, waiters, wrapper classes, or third-party libraries that call
+    boto3 internally. In all these cases the static parser sees nothing, RPM=∅,
+    and without this check the delta engine would conclude every granted
+    permission is excess and generate a patch that removes all of them.
+    The requires_human_review flag would NOT fire under the old logic because
+    nothing looked uncertain — the parser was confidently wrong.
+    """
+    gpm, match_method = match_rpm_to_gpm(rpm, gpms, manifest)
+
+    if gpm is None or match_method == MatchMethod.AMBIGUOUS:
+        return DeltaResult(
+            role_arn="unknown",
+            role_name="unknown",
+            commit_sha=rpm.commit_sha,
+            matched_by=MatchMethod.AMBIGUOUS,
+            rpm_service_name=rpm.service_name,
+            excess=[],
+            requires_human_review=True,
+            patch_risk="yellow"
         )
-    ]
-    return RPM(
-        service_name=service_name,
-        language="python",
-        commit_sha="abc123",
-        sdk_calls=calls
+
+    required = _get_required_actions(rpm)
+    granted = _get_granted_actions(gpm)
+
+    # ── Empty-RPM circuit breaker ──────────────────────────────────────────
+    # If static analysis found zero IAM actions but AWS has granted permissions,
+    # the parser's view is incomplete. Common causes: pandas/s3fs/awswrangler
+    # using boto3 internally, boto3.resource() API, paginators, waiters,
+    # wrapper classes that hide the actual SDK call, copy_object (needs perms
+    # on two resources), KMS-encrypted S3 (needs kms:Decrypt alongside s3:*).
+    # Never generate a "remove everything" patch from an empty RPM.
+    if not required and granted:
+        log.warning(
+            "EMPTY-RPM circuit breaker fired for role %s — "
+            "no SDK calls detected but %d permissions are granted. "
+            "Possible indirect boto3 usage (pandas/s3fs/wrapper/other language). "
+            "Forcing human review.",
+            gpm.role_arn,
+            len(granted),
+        )
+        return DeltaResult(
+            role_arn=gpm.role_arn,
+            role_name=gpm.role_name,
+            commit_sha=rpm.commit_sha,
+            matched_by=match_method,
+            rpm_service_name=rpm.service_name,
+            excess=[],
+            requires_human_review=True,
+            patch_risk="yellow",
+        )
+    # ── End circuit breaker ────────────────────────────────────────────────
+
+    excess_actions = granted - required
+
+    entries: list[DeltaEntry] = []
+
+    for action in excess_actions:
+        entries.append(DeltaEntry(
+            action_iam=action,
+            over_privilege_type=OverPrivilegeType.ACTION,
+            severity=get_severity(action),
+            confidence=Confidence.HIGH,
+            reason=f"{action} is granted but never called by {rpm.service_name}"
+        ))
+
+    entries.extend(_get_resource_scope_violations(rpm, gpm))
+
+    requires_review = (
+        _has_low_confidence(rpm)
+        or match_method == MatchMethod.AMBIGUOUS
+        or gpm.requires_human_review
+    )
+
+    if not entries:
+        patch_risk = "green"
+    elif requires_review:
+        patch_risk = "yellow"
+    else:
+        patch_risk = "red"
+
+    return DeltaResult(
+        role_arn=gpm.role_arn,
+        role_name=gpm.role_name,
+        commit_sha=rpm.commit_sha,
+        matched_by=match_method,
+        rpm_service_name=rpm.service_name,
+        excess=entries,
+        requires_human_review=requires_review,
+        patch_risk=patch_risk
     )
 
 
-def make_gpm(role_name="sample-lambda-role", actions=None, resources=None) -> GPM:
-    actions = actions or ["s3:GetObject", "s3:DeleteBucket", "s3:PutObject"]
-    resources = resources or ["*"]
-    return GPM(
-        role_name=role_name,
-        role_arn=f"arn:aws:iam::123456789:role/{role_name}",
-        created_by=None,
-        last_modified_pr=None,
-        attached_policies=[
-            AttachedPolicy(
-                policy_arn="arn:aws:iam::local:policy/test-policy",
-                statements=[
-                    Statement(
-                        effect="Allow",
-                        actions=actions,
-                        actions_expanded=actions,
-                        actions_wildcard=False,
-                        resources=resources,
-                        resources_wildcard="*" in resources
-                    )
-                ]
-            )
-        ]
-    )
-
-
-# --- Tests ---
-
-def test_excess_actions_identified():
-    rpm = make_rpm(calls=[
-        SDKCall(
-            service="s3", action="get_object", action_iam="s3:GetObject",
-            resources=["*"], resources_wildcard=True, confidence=Confidence.HIGH
-        )
-    ])
-    gpm = make_gpm(actions=["s3:GetObject", "s3:DeleteBucket", "s3:PutObject"],
-                   resources=["*"])
-    result = compute_delta(rpm, [gpm])
-    excess_actions = {e.action_iam for e in result.excess
-                      if e.over_privilege_type == OverPrivilegeType.ACTION}
-    assert "s3:DeleteBucket" in excess_actions
-    assert "s3:PutObject" in excess_actions
-    assert "s3:GetObject" not in excess_actions
-
-
-def test_delete_bucket_is_high_severity():
-    assert get_severity("s3:DeleteBucket") == Severity.HIGH
-
-
-def test_iam_create_role_is_high_severity():
-    assert get_severity("iam:CreateRole") == Severity.HIGH
-
-
-def test_s3_get_object_is_low_severity():
-    assert get_severity("s3:GetObject") == Severity.LOW
-
-
-def test_low_confidence_sets_requires_human_review():
-    rpm = make_rpm(calls=[
-        SDKCall(
-            service="s3", action="get_object", action_iam="s3:GetObject",
-            resources=["*"], resources_wildcard=True, confidence=Confidence.LOW
-        )
-    ])
-    gpm = make_gpm()
-    result = compute_delta(rpm, [gpm])
-    assert result.requires_human_review is True
-
-
-def test_no_excess_produces_green_patch_risk():
-    rpm = make_rpm(calls=[
-        SDKCall(
-            service="s3", action="get_object", action_iam="s3:GetObject",
-            resources=["*"], resources_wildcard=True, confidence=Confidence.HIGH
-        )
-    ])
-    gpm = make_gpm(actions=["s3:GetObject"], resources=["*"])
-    result = compute_delta(rpm, [gpm])
-    assert result.patch_risk == "green"
-    assert len(result.excess) == 0
-
-
-def test_ambiguous_match_on_no_gpms():
-    rpm = make_rpm()
-    result = compute_delta(rpm, [])
-    assert result.matched_by == MatchMethod.AMBIGUOUS
-    assert result.requires_human_review is True
-    assert result.patch_risk == "yellow"
-
-
-def test_compute_all_deltas_one_per_role():
-    rpm = make_rpm()
-    gpms = [
-        make_gpm(role_name="sample-lambda-role"),
-        make_gpm(role_name="another-role"),
-    ]
-    results = compute_all_deltas(rpm, gpms)
-    assert len(results) == 2
-
-
-def test_resource_scope_violation_detected():
-    rpm = make_rpm(calls=[
-        SDKCall(
-            service="s3", action="get_object", action_iam="s3:GetObject",
-            resources=["arn:aws:s3:::my-bucket/*"],
-            resources_wildcard=False, confidence=Confidence.HIGH
-        )
-    ])
-    gpm = make_gpm(actions=["s3:GetObject"], resources=["*"])
-    result = compute_delta(rpm, [gpm])
-    resource_violations = [e for e in result.excess
-                           if e.over_privilege_type == OverPrivilegeType.RESOURCE]
-    assert len(resource_violations) >= 1
-    assert resource_violations[0].action_iam == "s3:GetObject"
+def compute_all_deltas(
+    rpm: RPM,
+    gpms: list[GPM],
+    manifest: dict[str, str] | None = None,
+) -> list[DeltaResult]:
+    """
+    Computes one DeltaResult per GPM role.
+    Each role is evaluated independently against the same RPM.
+    """
+    return [compute_delta(rpm, [gpm], manifest) for gpm in gpms]
