@@ -65,7 +65,6 @@ def _reject_replay(delivery_id: str) -> None:
         if "unique" in str(e).lower() or "duplicate" in str(e).lower():
             log.info(f"Replay rejected: delivery {delivery_id} already processed")
             raise HTTPException(status_code=200, detail="already_processed")
-        # Non-duplicate error — let it propagate
         raise
 
 
@@ -124,16 +123,23 @@ async def github_webhook(
     pr_number = data.get("issue", {}).get("number")
     repo = data.get("repository", {}).get("full_name", "")
 
+    # Store numeric GitHub ID alongside login.
+    # Login is renameable — if an approver renames their GitHub account,
+    # the login in the PDF no longer matches their identity.
+    # The numeric ID is immutable and assigned by GitHub at account creation.
+    commenter_id = str(data.get("comment", {}).get("user", {}).get("id", ""))
+
     # Write approval to Supabase using service role key
     try:
         _service_client().table("approvals").insert({
             "commit_sha": commit_sha,
             "role_arn": role_arn,
             "approver_github_login": commenter,
+            "approver_github_id": commenter_id,
             "pr_number": pr_number,
             "repo": repo,
         }).execute()
-        log.info(f"Approval recorded: {commenter} approved {role_arn} @ {commit_sha}")
+        log.info(f"Approval recorded: {commenter} (id={commenter_id}) approved {role_arn} @ {commit_sha}")
     except Exception as e:
         if "unique" in str(e).lower():
             return {"status": "already_approved"}
@@ -145,4 +151,5 @@ async def github_webhook(
         "commit_sha": commit_sha,
         "role_arn": role_arn,
         "approver": commenter,
+        "approver_id": commenter_id,
     }
