@@ -348,7 +348,7 @@ const Auth = (() => {
     if (!sb) return Toast.show('Sign-in is unavailable right now.', 'err');
     const { error } = await sb.auth.signInWithOAuth({
       provider: 'google',
-      options: { redirectTo: location.origin },
+      options: { redirectTo: location.origin + location.pathname },
     });
     if (error) Toast.show(error.message, 'err');
   };
