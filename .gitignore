@@ -52,3 +52,4 @@ debug_ts.py
 *.tfstate.backup
 .terraform/
 .terraform.lock.hcl
+ace-cli/test_repos/
