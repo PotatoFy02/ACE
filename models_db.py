@@ -86,3 +86,25 @@ class StatsRow(BaseModel):
     open_risk: dict[str, int] = {}
     soc2_controls_covered: list[str] = []
     readiness_score: int = 0
+
+
+class SweeperRoleRow(BaseModel):
+    role_arn: str
+    role_name: str
+    repo: str
+    tf_file_path: str = ""
+    owner_slack_id: str | None = None
+    state: str = "ACTIVE"
+    ignore_dormancy: bool = False
+    ignore_reason: str | None = None
+    last_checked_at: str | None = None
+    updated_at: str | None = None
+    dormancy_detected_at: str | None = None
+    iam_last_used_at: str | None = None
+    last_activity_at: str | None = None
+    reduction_ready_at: str | None = None
+    pr_url: str | None = None
+    pr_number: int | None = None
+
+    class Config:
+        extra = "ignore"

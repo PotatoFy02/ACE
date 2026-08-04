@@ -1,13 +1,18 @@
-"""
+﻿"""
 sweeper/db.py — Supabase reads/writes for sweeper state machine.
 Uses service role key — RLS blocks anon key on sweeper_roles table.
 """
 
-import os
 import logging
+import sys
+import os
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
+
 from typing import Any, cast
 from datetime import datetime, timezone, timedelta
 from supabase import create_client
+from db_helpers import parse_rows, parse_row
+from models_db import SweeperRoleRow
 
 log = logging.getLogger("sweeper.db")
 
@@ -15,9 +20,8 @@ COOLING_OFF_DAYS = 14
 
 
 def _client():
-    url = os.environ["SUPABASE_URL"]
-    key = os.environ["SUPABASE_SERVICE_KEY"]
-    return create_client(url, key)
+    from config import settings
+    return create_client(settings.supabase_url, settings.supabase_service_key)
 
 
 def upsert_role(
@@ -29,7 +33,7 @@ def upsert_role(
     ignore_dormancy: bool = False,
     ignore_reason: str | None = None,
 ) -> dict[str, Any]:
-    existing = (
+    existing_res = (
         _client()
         .table("sweeper_roles")
         .select("*")
@@ -40,7 +44,7 @@ def upsert_role(
 
     now = datetime.now(timezone.utc).isoformat()
 
-    if existing and existing.data:
+    if existing_res and existing_res.data:
         _client().table("sweeper_roles").update({
             "role_name": role_name,
             "repo": repo,
@@ -51,7 +55,10 @@ def upsert_role(
             "last_checked_at": now,
             "updated_at": now,
         }).eq("role_arn", role_arn).execute()
-        return cast(dict[str, Any], existing.data)  # type: ignore[union-attr]
+        existing = parse_row(existing_res.data, SweeperRoleRow)
+        if existing:
+            return existing.model_dump()
+        return cast(dict[str, Any], existing_res.data)
 
     result = _client().table("sweeper_roles").insert({
         "role_arn": role_arn,
@@ -64,7 +71,11 @@ def upsert_role(
         "ignore_reason": ignore_reason,
         "last_checked_at": now,
     }).execute()
-    return cast(dict[str, Any], result.data[0])  # type: ignore[union-attr]
+
+    rows = parse_rows(result.data, SweeperRoleRow)
+    if rows:
+        return rows[0].model_dump()
+    raise ValueError(f"Failed to insert role: {role_arn}")
 
 
 def get_role(role_arn: str) -> dict[str, Any] | None:
@@ -76,7 +87,8 @@ def get_role(role_arn: str) -> dict[str, Any] | None:
         .maybe_single()
         .execute()
     )
-    return cast(dict[str, Any] | None, result.data)  # type: ignore[union-attr]
+    row = parse_row(result.data if result else None, SweeperRoleRow)
+    return row.model_dump() if row else None
 
 
 def transition(
@@ -107,12 +119,11 @@ def transition(
         "actor": actor,
     }).execute()
 
-    log.info(f"Transition: {role_arn} {from_state} → {to_state} ({reason})")
+    log.info("Transition: %s %s → %s (%s)", role_arn, from_state, to_state, reason)
 
 
 def get_pending_roles_past_cooling_off() -> list[dict[str, Any]]:
     cutoff = (datetime.now(timezone.utc) - timedelta(days=COOLING_OFF_DAYS)).isoformat()
-
     result = (
         _client()
         .table("sweeper_roles")
@@ -121,7 +132,8 @@ def get_pending_roles_past_cooling_off() -> list[dict[str, Any]]:
         .lt("dormancy_detected_at", cutoff)
         .execute()
     )
-    return cast(list[dict[str, Any]], result.data or [])
+    rows = parse_rows(result.data, SweeperRoleRow)
+    return [r.model_dump() for r in rows]
 
 
 def get_roles_by_state(state: str) -> list[dict[str, Any]]:
@@ -132,49 +144,50 @@ def get_roles_by_state(state: str) -> list[dict[str, Any]]:
         .eq("state", state)
         .execute()
     )
-    return cast(list[dict[str, Any]], result.data or [])
+    rows = parse_rows(result.data, SweeperRoleRow)
+    return [r.model_dump() for r in rows]
 
 
 def get_sweeper_status() -> list[dict[str, Any]]:
     """
     Returns countdown and state for every tracked role.
     Used by GET /api/ace/sweeper-status.
-
-    For PENDING_REDUCTION roles, calculates days remaining in the cooling-off
-    period so customers can see exactly when a PR will be opened.
+    For PENDING_REDUCTION roles, calculates days_until_pr.
     """
     result = (
         _client()
         .table("sweeper_roles")
-        .select("role_arn, role_name, repo, state, dormancy_detected_at, pr_url, pr_number, ignore_dormancy, last_checked_at")
+        .select(
+            "role_arn, role_name, repo, state, dormancy_detected_at, "
+            "pr_url, pr_number, ignore_dormancy, last_checked_at"
+        )
         .execute()
     )
-    roles = cast(list[dict[str, Any]], result.data or [])
+    rows = parse_rows(result.data, SweeperRoleRow)
 
     now = datetime.now(timezone.utc)
     output: list[dict[str, Any]] = []
 
-    for role in roles:
+    for role in rows:
         entry: dict[str, Any] = {
-            "role_arn": role["role_arn"],
-            "role_name": role["role_name"],
-            "repo": role["repo"],
-            "state": role["state"],
-            "ignore_dormancy": role.get("ignore_dormancy", False),
-            "last_checked_at": role.get("last_checked_at"),
-            "pr_url": role.get("pr_url"),
-            "pr_number": role.get("pr_number"),
+            "role_arn": role.role_arn,
+            "role_name": role.role_name,
+            "repo": role.repo,
+            "state": role.state,
+            "ignore_dormancy": role.ignore_dormancy,
+            "last_checked_at": role.last_checked_at,
+            "pr_url": role.pr_url,
+            "pr_number": role.pr_number,
             "days_until_pr": None,
             "cooling_off_started_at": None,
         }
 
-        if role["state"] == "PENDING_REDUCTION" and role.get("dormancy_detected_at"):
-            detected_str = str(role["dormancy_detected_at"]).replace("Z", "+00:00")
+        if role.state == "PENDING_REDUCTION" and role.dormancy_detected_at:
+            detected_str = str(role.dormancy_detected_at).replace("Z", "+00:00")
             detected_at = datetime.fromisoformat(detected_str)
             elapsed = (now - detected_at).days
-            days_remaining = max(0, COOLING_OFF_DAYS - elapsed)
-            entry["days_until_pr"] = days_remaining
-            entry["cooling_off_started_at"] = role["dormancy_detected_at"]
+            entry["days_until_pr"] = max(0, COOLING_OFF_DAYS - elapsed)
+            entry["cooling_off_started_at"] = role.dormancy_detected_at
 
         output.append(entry)
 
