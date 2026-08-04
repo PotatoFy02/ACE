@@ -1,5 +1,5 @@
-# Copyright (c) 2026 Pot (PotatoFy02). All rights reserved.
-# ACE — Automated Cybersecurity Engine
+ï»¿# Copyright (c) 2026 Pot (PotatoFy02). All rights reserved.
+# ACE - Automated Cybersecurity Engine
 # Central environment variable validation. App refuses to start if vars missing.
 from pydantic_settings import BaseSettings
 
