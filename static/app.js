@@ -1438,6 +1438,11 @@ const Router = (() => {
 
   const boot = () => {
     const h = location.hash.slice(1);
+    if (h.startsWith('access_token=') || h.includes('access_token=')) {
+      setTimeout(() => go('overview', { force: true }), 500);
+      window.addEventListener('hashchange', () => go(location.hash.slice(1)));
+      return;
+    }
     go(VIEWS.includes(h) ? h : 'overview', { force: true });
     window.addEventListener('hashchange', () => go(location.hash.slice(1)));
   };
