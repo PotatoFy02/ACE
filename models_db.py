@@ -1,12 +1,14 @@
 ﻿# Copyright (c) 2026 Pot (PotatoFy02). All rights reserved.
-# ACE — Automated Cybersecurity Engine
+# ACE - Automated Cybersecurity Engine
 # Typed Pydantic models mirroring Supabase table rows.
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from typing import Optional, Any
 from datetime import datetime
 
 
 class ProjectRow(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
     id: str
     user_id: str
     name: str
@@ -16,11 +18,10 @@ class ProjectRow(BaseModel):
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 
-    class Config:
-        extra = "ignore"
-
 
 class ThreatRow(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
     id: str
     project_id: str
     title: str
@@ -42,20 +43,18 @@ class ThreatRow(BaseModel):
     iso27001_control: str = ""
     nist_control: str = ""
 
-    class Config:
-        extra = "ignore"
-
 
 class MitigationRow(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
     id: str
     threat_id: str
     description: str
 
-    class Config:
-        extra = "ignore"
-
 
 class EvidenceRow(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
     threat_id: Optional[str] = None
     title: str
     category: str
@@ -72,11 +71,10 @@ class EvidenceRow(BaseModel):
     approver_github_login: str
     approved_at: Optional[datetime] = None
 
-    class Config:
-        extra = "ignore"
-
 
 class StatsRow(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
     total_threats: int = 0
     pending: int = 0
     accepted: int = 0
@@ -89,6 +87,8 @@ class StatsRow(BaseModel):
 
 
 class SweeperRoleRow(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
     role_arn: str
     role_name: str
     repo: str
@@ -105,6 +105,3 @@ class SweeperRoleRow(BaseModel):
     reduction_ready_at: str | None = None
     pr_url: str | None = None
     pr_number: int | None = None
-
-    class Config:
-        extra = "ignore"
