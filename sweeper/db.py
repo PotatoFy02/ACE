@@ -1,12 +1,13 @@
-﻿"""
-sweeper/db.py — Supabase reads/writes for sweeper state machine.
-Uses service role key — RLS blocks anon key on sweeper_roles table.
+# -*- coding: utf-8 -*-
+"""
+sweeper/db.py - Supabase reads/writes for sweeper state machine.
+Uses service role key - RLS blocks anon key on sweeper_roles table.
 """
 
 import logging
 import sys
 import os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from typing import Any, cast
 from datetime import datetime, timezone, timedelta
@@ -119,7 +120,7 @@ def transition(
         "actor": actor,
     }).execute()
 
-    log.info("Transition: %s %s → %s (%s)", role_arn, from_state, to_state, reason)
+    log.info("Transition: %s %s -> %s (%s)", role_arn, from_state, to_state, reason)
 
 
 def get_pending_roles_past_cooling_off() -> list[dict[str, Any]]:
