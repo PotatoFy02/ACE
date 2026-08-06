@@ -27,7 +27,7 @@ const SUPABASE_ANON_KEY =
   'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVibGRzcHZicGVqdG54bmlxdm5lIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI5ODU2OTEsImV4cCI6MjA5ODU2MTY5MX0.p9XbrjMnQuHmdk1erB5wWrpnw4D5APpdxoe-M0S2-10';
 
 const CFG = {
-  freeScans:        3,
+  freeScans:        10,
   freeAnonDemos:    1,
   freeEvidence:     0,
   freeRoles:        5,
@@ -331,8 +331,14 @@ const Auth = (() => {
 
     sb.auth.onAuthStateChange((event, session) => {
       const was = !!Store.s.session;
+      const prevId = Store.s.session?.user?.id;
+      const nextId = session?.user?.id;
       Store.set({ session });
       Gateway.invalidate();
+      if (nextId && nextId !== prevId) {
+        Store.set({ scansUsed: disk.get('scansUsed:' + nextId, 0) });
+      }
+      if (!session) Store.set({ scansUsed: 0 });
       paint();
       if (!was && session) { track('sign_in'); Views.overview(true); }
       if (was && !session) { track('sign_out'); Views.overview(true); }
@@ -782,7 +788,7 @@ const Revenue = (() => {
     if (isPaid()) return true;
     if (scansLeft() <= 0) { gate('scan_quota'); return false; }
     Store.set({ scansUsed: Store.s.scansUsed + 1 });
-    disk.set('scansUsed', Store.s.scansUsed);
+    disk.set('scansUsed:' + (Store.s.session?.user?.id || 'anon'), Store.s.scansUsed);
     paintQuota();
     track('scan_consumed', { remaining: scansLeft() });
     if (scansLeft() === 1) Toast.show('1 free analysis left this month.', 'warn');
