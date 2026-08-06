@@ -157,7 +157,7 @@ const Store = {
     view:      'overview',
     session:   null,
     plan:      disk.get('plan', 'free'),
-    scansUsed: disk.get('scansUsed', 0),
+    scansUsed: 0,
     anonDemos: disk.get('anonDemos', 0),
     projects:  [],
     roles:     [],
@@ -788,7 +788,9 @@ const Revenue = (() => {
     if (isPaid()) return true;
     if (scansLeft() <= 0) { gate('scan_quota'); return false; }
     Store.set({ scansUsed: Store.s.scansUsed + 1 });
-    disk.set('scansUsed:' + (Store.s.session?.user?.id || 'anon'), Store.s.scansUsed);
+    const uid = Store.s.session?.user?.id || 'anon';
+    disk.set('scansUsed:' + uid, Store.s.scansUsed);
+    disk.set('scansMonth:' + uid, new Date().getMonth());
     paintQuota();
     track('scan_consumed', { remaining: scansLeft() });
     if (scansLeft() === 1) Toast.show('1 free analysis left this month.', 'warn');
