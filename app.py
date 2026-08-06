@@ -115,6 +115,7 @@ async def hardening(request: Request, call_next):
         "default-src 'self'; "
         "script-src 'self' https://cdn.jsdelivr.net 'unsafe-inline'; "
         "style-src 'self' 'unsafe-inline'; "
+        "img-src 'self' data:; "
         "connect-src 'self' https://*.supabase.co; "
         "frame-ancestors 'none'"
     )
@@ -316,10 +317,6 @@ def stats(request: Request, pid: str, user=Depends(verify_token), jwt=Depends(ge
 @app.get("/api/projects/{pid}/pdf")
 @limiter.limit("30/minute")
 def export_pdf(request: Request, pid: str, user=Depends(verify_token), jwt=Depends(get_bearer)):
-    """
-    V1 threat model PDF — unchanged.
-    Returns the STRIDE threat model report for a project.
-    """
     data = get_project(jwt, pid)
     if not data["project"]:
         raise HTTPException(404, "Not found.")
@@ -347,9 +344,6 @@ def export_evidence_pdf(
     user=Depends(verify_token),
     jwt=Depends(get_bearer)
 ):
-    """
-    V2 SOC2 CC6.3 auditor evidence PDF.
-    """
     data = get_project(jwt, pid)
     if not data["project"]:
         raise HTTPException(404, "Project not found.")
@@ -389,11 +383,6 @@ def export_evidence_pdf(
 @app.get("/api/ace/sweeper-status")
 @limiter.limit("60/minute")
 def sweeper_status(request: Request, user=Depends(verify_token)):
-    """
-    Returns the current state and cooling-off countdown for every tracked IAM role.
-    PENDING_REDUCTION roles include days_until_pr so customers can see exactly
-    when ACE will open a PR — no more surprise PRs on day 14.
-    """
     try:
         return {"roles": get_sweeper_status()}
     except Exception:

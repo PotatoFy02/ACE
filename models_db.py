@@ -10,7 +10,7 @@ class ProjectRow(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     id: str
-    user_id: str
+    user_id: str | None = None
     name: str
     system_summary: Optional[str] = None
     architecture_description: Optional[str] = None
@@ -38,8 +38,6 @@ class ThreatRow(BaseModel):
     ace_role_arn: Optional[str] = None
     ace_mitigated_at: Optional[datetime] = None
     mitigations: Optional[list[Any]] = None
-
-    # Derived fields populated by get_project()
     iso27001_control: str = ""
     nist_control: str = ""
 
