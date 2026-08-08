@@ -1777,7 +1777,12 @@ function wireDelegation() {
     if (pdf) return Views.downloadPdf(pdf.dataset.pdf, pdf.dataset.pdfName);
 
     if (t.closest('[data-signin]') || t.closest('#acct')) {
-      return Store.s.session ? Auth.signOut() : Auth.signIn();
+      if (Store.s.session) {
+        if (confirm('Sign out of ACE?')) Auth.signOut();
+      } else {
+        Auth.signIn();
+      }
+      return;
     }
 
     if (t.closest('#btn-cmdk')) return Cmdk.open();
