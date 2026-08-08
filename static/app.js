@@ -335,8 +335,15 @@ const Auth = (() => {
       const nextId = session?.user?.id;
       Store.set({ session });
       Gateway.invalidate();
-      if (nextId && nextId !== prevId) {
-        Store.set({ scansUsed: disk.get('scansUsed:' + nextId, 0) });
+     if (nextId && nextId !== prevId) {
+        const savedMonth = disk.get('scansMonth:' + nextId, -1);
+        const thisMonth  = new Date().getMonth();
+        const saved      = savedMonth === thisMonth ? disk.get('scansUsed:' + nextId, 0) : 0;
+        if (savedMonth !== thisMonth) {
+          disk.set('scansUsed:' + nextId, 0);
+          disk.set('scansMonth:' + nextId, thisMonth);
+        }
+        Store.set({ scansUsed: saved });
       }
       if (!session) Store.set({ scansUsed: 0 });
       paint();
@@ -1451,6 +1458,16 @@ const Router = (() => {
       window.addEventListener('hashchange', () => go(location.hash.slice(1)));
       return;
     }
+        const uid = Store.s.session?.user?.id;
+    if (uid) {
+      const savedMonth = disk.get('scansMonth:' + uid, -1);
+      const thisMonth  = new Date().getMonth();
+      if (savedMonth !== thisMonth) {
+        disk.set('scansUsed:' + uid, 0);
+        disk.set('scansMonth:' + uid, thisMonth);
+        Store.set({ scansUsed: 0 });
+      }
+    }  
     go(VIEWS.includes(h) ? h : 'overview', { force: true });
     window.addEventListener('hashchange', () => go(location.hash.slice(1)));
   };
