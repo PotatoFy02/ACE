@@ -1,14 +1,19 @@
+# -*- coding: utf-8 -*-
+# Copyright (c) 2026 Pot (PotatoFy02). All rights reserved.
+# ACE - Automated Cybersecurity Engine
 """
-webhook.py — GitHub PR comment webhook handler.
-Receives /ace approve <commit_sha> <role_arn> comments,
-verifies HMAC signature, rejects replays, writes approval to Supabase.
+webhook.py - GitHub PR comment webhook handler and Slack interactions handler.
 """
 
 import hashlib
 import hmac
-import os
+import json
 import logging
-from fastapi import APIRouter, Request, HTTPException, Header
+import os
+import time
+import urllib.parse
+
+from fastapi import APIRouter, Header, HTTPException, Request
 from supabase import create_client
 
 log = logging.getLogger("webhook")
@@ -16,7 +21,8 @@ log = logging.getLogger("webhook")
 router = APIRouter(prefix="/webhooks", tags=["webhooks"])
 
 GITHUB_WEBHOOK_SECRET = os.environ.get("GITHUB_WEBHOOK_SECRET", "")
-AUTHORIZED_APPROVERS = set(
+SLACK_SIGNING_SECRET  = os.environ.get("SLACK_SIGNING_SECRET", "")
+AUTHORIZED_APPROVERS  = set(
     filter(None, os.environ.get("AUTHORIZED_APPROVERS", "").split(","))
 )
 
@@ -30,11 +36,6 @@ def _service_client():
 
 
 def _verify_signature(payload: bytes, sig_header: str) -> bool:
-    """
-    Proves request is from GitHub, not a random POST.
-    GitHub signs the payload with your secret using HMAC-SHA256.
-    compare_digest prevents timing attacks.
-    """
     if not sig_header or not sig_header.startswith("sha256="):
         return False
     expected = hmac.new(
@@ -46,17 +47,21 @@ def _verify_signature(payload: bytes, sig_header: str) -> bool:
     return hmac.compare_digest(expected, actual)
 
 
-def _reject_replay(delivery_id: str) -> None:
-    """
-    Idempotency guard — GitHub retries failed webhooks with the same
-    X-GitHub-Delivery ID. Without this check, a network blip or a slow
-    Supabase write causes the same approval to be recorded twice, producing
-    duplicate approver rows in the PDF.
+def _verify_slack_signature(payload: bytes, timestamp: str, signature: str) -> bool:
+    if not SLACK_SIGNING_SECRET:
+        return False
+    if abs(time.time() - int(timestamp)) > 300:
+        return False
+    base = f"v0:{timestamp}:{payload.decode()}"
+    expected = "v0=" + hmac.new(
+        SLACK_SIGNING_SECRET.encode(),
+        base.encode(),
+        hashlib.sha256
+    ).hexdigest()
+    return hmac.compare_digest(expected, signature)
 
-    Strategy: attempt to INSERT the delivery_id. If it already exists
-    (unique constraint violation), the delivery is a replay — raise 200
-    so GitHub stops retrying without treating it as an error.
-    """
+
+def _reject_replay(delivery_id: str) -> None:
     try:
         _service_client().table("webhook_deliveries").insert(
             {"delivery_id": delivery_id}
@@ -77,31 +82,25 @@ async def github_webhook(
 ):
     payload = await request.body()
 
-    # Reject anything not signed by GitHub
     if not _verify_signature(payload, x_hub_signature_256 or ""):
         raise HTTPException(status_code=401, detail="Invalid signature")
 
-    # Reject replay deliveries before doing any work
     if x_github_delivery:
         _reject_replay(x_github_delivery)
 
-    # Only handle PR comments
     if x_github_event != "issue_comment":
         return {"status": "ignored", "event": x_github_event}
 
     data = await request.json()
 
-    # Only act on created comments, not edits/deletes
     if data.get("action") != "created":
         return {"status": "ignored", "action": data.get("action")}
 
     comment_body = data.get("comment", {}).get("body", "").strip()
 
-    # Only act on /ace approve commands
     if not comment_body.lower().startswith("/ace approve"):
         return {"status": "ignored", "reason": "not an ace approve comment"}
 
-    # Check commenter is authorized
     commenter = data.get("comment", {}).get("user", {}).get("login", "")
     if commenter not in AUTHORIZED_APPROVERS:
         log.warning(f"Unauthorized approval attempt by {commenter}")
@@ -110,7 +109,6 @@ async def github_webhook(
             detail=f"{commenter} is not an authorized approver"
         )
 
-    # Parse: /ace approve <commit_sha> <role_arn>
     parts = comment_body.split()
     if len(parts) < 4:
         raise HTTPException(
@@ -118,26 +116,20 @@ async def github_webhook(
             detail="Format: /ace approve <commit_sha> <role_arn>"
         )
 
-    commit_sha = parts[2]
-    role_arn = parts[3]
-    pr_number = data.get("issue", {}).get("number")
-    repo = data.get("repository", {}).get("full_name", "")
-
-    # Store numeric GitHub ID alongside login.
-    # Login is renameable — if an approver renames their GitHub account,
-    # the login in the PDF no longer matches their identity.
-    # The numeric ID is immutable and assigned by GitHub at account creation.
+    commit_sha   = parts[2]
+    role_arn     = parts[3]
+    pr_number    = data.get("issue", {}).get("number")
+    repo         = data.get("repository", {}).get("full_name", "")
     commenter_id = str(data.get("comment", {}).get("user", {}).get("id", ""))
 
-    # Write approval to Supabase using service role key
     try:
         _service_client().table("approvals").insert({
-            "commit_sha": commit_sha,
-            "role_arn": role_arn,
+            "commit_sha":            commit_sha,
+            "role_arn":              role_arn,
             "approver_github_login": commenter,
-            "approver_github_id": commenter_id,
-            "pr_number": pr_number,
-            "repo": repo,
+            "approver_github_id":    commenter_id,
+            "pr_number":             pr_number,
+            "repo":                  repo,
         }).execute()
         log.info(f"Approval recorded: {commenter} (id={commenter_id}) approved {role_arn} @ {commit_sha}")
     except Exception as e:
@@ -147,9 +139,58 @@ async def github_webhook(
         raise HTTPException(status_code=500, detail="Failed to record approval")
 
     return {
-        "status": "approved",
-        "commit_sha": commit_sha,
-        "role_arn": role_arn,
-        "approver": commenter,
+        "status":      "approved",
+        "commit_sha":  commit_sha,
+        "role_arn":    role_arn,
+        "approver":    commenter,
         "approver_id": commenter_id,
     }
+
+
+@router.post("/slack/interactions")
+async def slack_interactions(
+    request: Request,
+    x_slack_request_timestamp: str = Header(None),
+    x_slack_signature: str = Header(None),
+):
+    payload = await request.body()
+
+    if not _verify_slack_signature(
+        payload,
+        x_slack_request_timestamp or "",
+        x_slack_signature or ""
+    ):
+        raise HTTPException(status_code=401, detail="Invalid Slack signature")
+
+    form = urllib.parse.parse_qs(payload.decode())
+    raw  = form.get("payload", ["{}"])[0]
+    data = json.loads(raw)
+
+    action_id = data.get("actions", [{}])[0].get("action_id", "")
+    role_arn  = data.get("actions", [{}])[0].get("value", "")
+    user      = data.get("user", {}).get("name", "unknown")
+
+    log.info(f"Slack interaction: {action_id} on {role_arn} by {user}")
+
+    if action_id == "ace_ignore_role":
+        try:
+            _service_client().table("sweeper_roles").update({
+                "ignore_dormancy": True,
+                "ignore_reason":   f"Ignored via Slack by {user}",
+            }).eq("role_arn", role_arn).execute()
+            log.info(f"Role {role_arn} marked ignore_dormancy by {user}")
+        except Exception as e:
+            log.error(f"Failed to ignore role {role_arn}: {e}")
+            raise HTTPException(status_code=500, detail="Failed to update role")
+
+    elif action_id == "ace_approve_role":
+        try:
+            _service_client().table("sweeper_roles").update({
+                "state": "PR_OPEN",
+            }).eq("role_arn", role_arn).execute()
+            log.info(f"Role {role_arn} approved for PR by {user}")
+        except Exception as e:
+            log.error(f"Failed to approve role {role_arn}: {e}")
+            raise HTTPException(status_code=500, detail="Failed to update role")
+
+    return {"text": f"Action `{action_id}` recorded for `{role_arn}` by {user}."}
