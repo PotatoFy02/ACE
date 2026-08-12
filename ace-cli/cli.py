@@ -1,12 +1,13 @@
+# -*- coding: utf-8 -*-
 # Copyright (c) 2026 Pot (PotatoFy02). All rights reserved.
-# ACE — Automated Cybersecurity Engine
+# ACE - Automated Cybersecurity Engine
 # Unauthorized commercial use prohibited. See LICENSE.
 """
-ace-cli — main entry point.
+ace-cli - main entry point.
 Usage:
   python cli.py analyze --file lambda.py --tf roles.tf
   python cli.py analyze --file lambda.py --tf roles.tf --manifest ace-manifest.yaml
-  python cli.py analyze --repo /path/to/repo
+  python cli.py sweep --repo PotatoFy02/ACE
 """
 import argparse
 import asyncio
@@ -15,14 +16,19 @@ import os
 import sys
 from pathlib import Path
 
+import boto3
+# Add ACE root to path so sweeper/ and models_db resolve
+sys.path.insert(0, str(Path(__file__).parent.parent))
 from parsers.rpm_engine import parse_python_file
 from parsers.gpm_engine import parse_terraform_file
 from delta_engine.engine import compute_all_deltas
 from delta_engine.manifest_loader import load_manifest
 from patch_generator.generator import generate_patch
+from sweeper.engine import process_role, advance_cooling_off
+from sweeper.db import get_roles_by_state
 
 
-# ── Audit helpers (no-op if ACE_DATABASE_URL not set) ────────────────────────
+# -- Audit helpers (no-op if ACE_DATABASE_URL not set) ------------------------
 
 def _audit_available() -> bool:
     return bool(os.environ.get("ACE_DATABASE_URL"))
@@ -91,15 +97,13 @@ def _fire_audit(rpm, deltas, patch_results):
         loop = asyncio.get_running_loop()
         loop.create_task(_write_audit(rpm, deltas, patch_results))
     except RuntimeError:
-        # No running loop — CLI is synchronous, run directly
         try:
             asyncio.run(_write_audit(rpm, deltas, patch_results))
         except Exception as e:
-            # Audit failure must never crash the CLI
             print(f"[audit] WARNING: {e}", file=sys.stderr)
 
 
-# ── Command ───────────────────────────────────────────────────────────────────
+# -- Commands -----------------------------------------------------------------
 
 def cmd_analyze(args):
     py_file = Path(args.file)
@@ -112,7 +116,6 @@ def cmd_analyze(args):
         print(f"ERROR: Terraform file not found: {tf_file}", file=sys.stderr)
         sys.exit(1)
 
-    # Load manifest if provided
     manifest = {}
     if args.manifest:
         manifest_path = Path(args.manifest)
@@ -149,8 +152,7 @@ def cmd_analyze(args):
         print(f"Human review:  {delta.requires_human_review}")
         print(f"Excess ({len(delta.excess)}):")
         if not delta.excess:
-            print("  None — role is correctly scoped")
-
+            print("  None - role is correctly scoped")
         else:
             for e in sorted(delta.excess, key=lambda x: x.severity, reverse=True):
                 print(f"  [{e.severity.upper():6}] {e.action_iam}")
@@ -168,11 +170,10 @@ def cmd_analyze(args):
         patch_results.append(patch)
         print()
 
-    # ── Audit writes — after all output, never blocks CLI ────────────────────
     if _audit_available():
         _fire_audit(rpm, deltas, patch_results)
     else:
-        print("[audit] ACE_DATABASE_URL not set — skipping audit log", file=sys.stderr)
+        print("[audit] ACE_DATABASE_URL not set - skipping audit log", file=sys.stderr)
 
     if args.json:
         output = [d.model_dump() for d in deltas]
@@ -182,7 +183,62 @@ def cmd_analyze(args):
         sys.exit(1)
 
 
-# ── Entry point ───────────────────────────────────────────────────────────────
+def cmd_sweep(args):
+    print(f"[sweep] Starting sweep (repo={args.repo})")
+
+    session = boto3.Session(profile_name=args.aws_profile) if args.aws_profile else boto3.Session()
+
+    # Verify AWS credentials
+    try:
+        sts = session.client("sts")
+        identity = sts.get_caller_identity()
+        print(f"[sweep] AWS account: {identity['Account']} ({identity['Arn']})")
+    except Exception as e:
+        print(f"[sweep] AWS credentials error: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    # Get all tracked roles from DB
+    states = ["ACTIVE", "PENDING_REDUCTION", "PR_OPEN"]
+    roles = []
+    for state in states:
+        roles.extend(get_roles_by_state(state))
+
+    if not roles:
+        print("[sweep] No roles tracked yet.")
+        print("[sweep] Add roles to the sweeper_roles table in Supabase first.")
+        return
+
+    print(f"[sweep] Processing {len(roles)} roles...")
+    for role in roles:
+        print(f"  -> {role['role_name']} ({role['role_arn']})")
+        try:
+            new_state = process_role(
+                role_arn=role["role_arn"],
+                role_name=role["role_name"],
+                repo=role["repo"],
+                tf_file_path=role["tf_file_path"],
+                owner_slack_id=role.get("owner_slack_id"),
+                excess_actions=[],
+                ignore_dormancy=role.get("ignore_dormancy", False),
+                boto3_session=session,
+            )
+            print(f"     state: {role['state']} -> {new_state}")
+        except Exception as e:
+            print(f"     ERROR: {e}", file=sys.stderr)
+
+    # Advance roles past cooling-off period
+    ready = advance_cooling_off()
+    if ready:
+        print(f"[sweep] {len(ready)} roles ready for PR:")
+        for r in ready:
+            print(f"  -> {r['role_name']} ({r['role_arn']})")
+    else:
+        print("[sweep] No roles past cooling-off period.")
+
+    print("[sweep] Done.")
+
+
+# -- Entry point --------------------------------------------------------------
 
 def main():
     parser = argparse.ArgumentParser(prog="ace-cli")
@@ -196,9 +252,15 @@ def main():
     analyze.add_argument("--output", help="Write patched .tf to this path")
     analyze.add_argument("--json", action="store_true", help="Output delta as JSON")
 
+    sweep = subparsers.add_parser("sweep", help="Run IAM sweeper against AWS")
+    sweep.add_argument("--repo", required=True, help="GitHub repo e.g. PotatoFy02/ACE")
+    sweep.add_argument("--aws-profile", default=None, help="AWS profile name (optional)")
+
     args = parser.parse_args()
     if args.command == "analyze":
         cmd_analyze(args)
+    elif args.command == "sweep":
+        cmd_sweep(args)
     else:
         parser.print_help()
 
