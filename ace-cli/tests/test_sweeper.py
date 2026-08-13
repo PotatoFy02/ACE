@@ -22,26 +22,35 @@ def make_mock_session(is_dormant: bool):
     return session
 
 
-def test_notify_skips_when_no_email():
-    result = notify_pending_reduction(
-        role_arn="arn:aws:iam::123:role/test",
-        role_name="test-role",
-        owner_slack_id=None,
-        repo="test-repo",
-        excess_actions=["s3:DeleteBucket"],
-    )
+def test_notify_skips_when_no_slack_id():
+    """No owner_slack_id and no Slack env vars — should return False."""
+    with patch.dict("os.environ", {
+        "SLACK_WEBHOOK_URL": "",
+        "SLACK_BOT_TOKEN": "",
+    }):
+        with patch("sweeper.notifier._send_webhook", return_value=False), \
+             patch("sweeper.notifier._send_dm", return_value=False):
+            result = notify_pending_reduction(
+                role_arn="arn:aws:iam::123:role/test",
+                role_name="test-role",
+                owner_slack_id=None,
+                repo="test-repo",
+                excess_actions=["s3:DeleteBucket"],
+            )
     assert result is False
 
 
-def test_notify_skips_when_smtp_not_configured():
-    result = notify_pending_reduction(
-        role_arn="arn:aws:iam::123:role/test",
-        role_name="test-role",
-        owner_slack_id="U012AB3CD",
-        repo="test-repo",
-        excess_actions=["s3:DeleteBucket"],
-    )
-    assert result is False
+def test_notify_sends_when_configured():
+    """With Slack configured and owner_slack_id set, notification should succeed."""
+    with patch("sweeper.notifier._send_dm", return_value=True):
+        result = notify_pending_reduction(
+            role_arn="arn:aws:iam::123:role/test",
+            role_name="test-role",
+            owner_slack_id="U012AB3CD",
+            repo="test-repo",
+            excess_actions=["s3:DeleteBucket"],
+        )
+    assert result is True
 
 
 @patch("sweeper.engine.upsert_role")
