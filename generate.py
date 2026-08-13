@@ -1,12 +1,13 @@
+# -*- coding: utf-8 -*-
 # Copyright (c) 2026 Pot (PotatoFy02). All rights reserved.
-# ACE — Automated Cybersecurity Engine
+# ACE - Automated Cybersecurity Engine
 # Unauthorized commercial use prohibited. See LICENSE.
 import os
 import time
 import threading
 import logging
 from enum import Enum
-from typing import List
+from typing import List, cast
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field
 from google import genai
@@ -131,7 +132,7 @@ def generate_threat_model(architecture_description: str) -> ThreatModel:
                 if model_name != GEMINI_MODEL:
                     log.warning(f"Primary model unavailable, succeeded with fallback: {model_name}")
 
-                return response.parsed
+                return cast(ThreatModel, response.parsed)
 
             except GenerationCapExceeded:
                 raise
@@ -142,7 +143,7 @@ def generate_threat_model(architecture_description: str) -> ThreatModel:
                 if attempt == 0:
                     time.sleep(1)
                 else:
-                    break  # move to next model in chain
+                    break
 
             except Exception as e:
                 log.exception(f"Gemini call failed on model {model_name}")
