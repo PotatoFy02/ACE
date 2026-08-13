@@ -50,7 +50,12 @@ def _verify_signature(payload: bytes, sig_header: str) -> bool:
 def _verify_slack_signature(payload: bytes, timestamp: str, signature: str) -> bool:
     if not SLACK_SIGNING_SECRET:
         return False
-    if abs(time.time() - int(timestamp)) > 300:
+    if not timestamp or not signature:
+        return False
+    try:
+        if abs(time.time() - int(timestamp)) > 300:
+            return False
+    except ValueError:
         return False
     base = f"v0:{timestamp}:{payload.decode()}"
     expected = "v0=" + hmac.new(
