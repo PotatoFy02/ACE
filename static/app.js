@@ -1673,7 +1673,9 @@ const Generate = (() => {
     }
     if (!jwt()) { setStatus('#st-github', 'Sign in to import a repository.', 'err'); Auth.signIn(); return; }
 
-    if (!isPaid()) { Revenue.gate('github'); track('paywall_hit', { trigger: 'github' }); return; }
+    const OWNER_EMAILS = ['prajnajyotihkd99@gmail.com'];
+    const isOwner = OWNER_EMAILS.includes(Store.s.session?.user?.email || '');
+    if (!isPaid() && !isOwner) { Revenue.gate('github'); track('paywall_hit', { trigger: 'github' }); return; }
 
     track('analysis_start', { source: 'github' });
     setStatus('#st-github', 'Cloning and analysing repository…', 'busy');

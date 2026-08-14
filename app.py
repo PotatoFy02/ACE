@@ -263,11 +263,16 @@ async def generate_from_file(request: Request, file: UploadFile = File(...),
 @limiter.limit("10/hour", exempt_when=_request_is_owner)
 def generate_from_github(request: Request, req: GithubImportRequest,
                           user=Depends(verify_token), jwt=Depends(get_bearer)):
+    import concurrent.futures
     try:
-        desc = validate_description(fetch_iac_from_repo(req.repo_url, parse_iac))
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(fetch_iac_from_repo, req.repo_url, parse_iac)
+            try:
+                desc = validate_description(future.result(timeout=25))
+            except concurrent.futures.TimeoutError:
+                raise HTTPException(504, "Repository import timed out. Try a smaller repository.")
     except GitHubImportError as e:
         raise HTTPException(400, str(e))
-
     try:
         if not _request_is_owner(request) and count_projects(jwt) >= FREE_PROJECT_LIMIT:
             raise HTTPException(402, f"Free limit reached ({FREE_PROJECT_LIMIT}). Upgrade to save more.")
