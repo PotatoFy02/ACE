@@ -53,3 +53,4 @@ debug_ts.py
 .terraform/
 .terraform.lock.hcl
 ace-cli/test_repos/
+trust.json
