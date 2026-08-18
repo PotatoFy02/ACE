@@ -266,7 +266,9 @@ body {
 }
 .acct-mail { font-size:12px; color:var(--ink-2); font-weight:500; max-width:150px;
              overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.acct-act  { font-size:10px; color:var(--ink-4); margin-top:1px; cursor:pointer; }
+.pane { display: none; }
+.pane.on { display: block; }
+.acct-act { font-size:10px; color:var(--ink-4); margin-top:1px; cursor:pointer; }
 .acct:hover .acct-act { color:var(--lumen); text-decoration:underline; }
 
 /* ── LAYER 4 · PRIMITIVES ───────────────────────────────────────────── */
@@ -1035,7 +1037,7 @@ select option { background:#0C0F18; color:var(--ink); }
           <button class="seg-b"    data-tab="github" role="tab" aria-selected="false" id="tab-github">Import from GitHub</button>
         </div>
 
-        <div id="pane-file" role="tabpanel" aria-labelledby="tab-file">
+        <div id="pane-file" class="pane on" role="tabpanel" aria-labelledby="tab-file">
           <input id="in-file-name" placeholder="Project name" maxlength="200" autocomplete="off">
           <div class="drop" id="drop-zone" role="button" tabindex="0" aria-label="Upload an infrastructure file">
             <svg class="drop-ic" viewBox="0 0 38 38" fill="none" aria-hidden="true">
@@ -1050,7 +1052,7 @@ select option { background:#0C0F18; color:var(--ink); }
           <p class="status" id="st-file" role="status" aria-live="polite"></p>
         </div>
 
-        <div id="pane-text" role="tabpanel" aria-labelledby="tab-text" hidden>
+        <div id="pane-text" class="pane" role="tabpanel" aria-labelledby="tab-text">
           <input id="in-text-name" placeholder="Project name" maxlength="200" autocomplete="off">
           <textarea id="in-desc" maxlength="8000"
             placeholder="Describe your architecture — AWS services, IAM roles, trust boundaries, data flows…"></textarea>
@@ -1066,7 +1068,7 @@ select option { background:#0C0F18; color:var(--ink); }
           <p class="status" id="st-text" role="status" aria-live="polite"></p>
         </div>
 
-        <div id="pane-github" role="tabpanel" aria-labelledby="tab-github" hidden>
+        <div id="pane-github" class="pane" role="tabpanel" aria-labelledby="tab-github">
           <input id="in-gh-name" placeholder="Project name" maxlength="200" autocomplete="off">
           <input id="in-gh-url"  placeholder="https://github.com/owner/repo" maxlength="300"
                  inputmode="url" autocomplete="off" spellcheck="false">
