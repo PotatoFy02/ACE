@@ -5,15 +5,15 @@ from jwt import PyJWKClient
 from fastapi import Header, HTTPException, Depends
 from dotenv import load_dotenv
 from supabase import create_client, Client
+from typing import Any
 
 load_dotenv()
 
 log = logging.getLogger("auth")
 
-SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_URL: str = os.getenv("SUPABASE_URL") or ""
 SUPABASE_JWT_SECRET = os.getenv("SUPABASE_JWT_SECRET")
 SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
-
 
 OWNER_EMAILS = {
     e.strip().lower()
@@ -21,10 +21,15 @@ OWNER_EMAILS = {
     if e.strip()
 }
 
+OWNER_USER_IDS = {
+    uid.strip()
+    for uid in os.getenv("OWNER_USER_IDS", "").split(",")
+    if uid.strip()
+}
+
 if not SUPABASE_URL:
     raise RuntimeError("SUPABASE_URL not set")
 
-# The public keys endpoint for verifying new-style (ES256/RS256) tokens
 JWKS_URL = f"{SUPABASE_URL}/auth/v1/.well-known/jwks.json"
 _jwk_client = PyJWKClient(JWKS_URL)
 
@@ -47,12 +52,10 @@ def _admin() -> Client:
 
 
 def decode_jwt(token: str) -> dict:
-    # Read the token's header to see which algorithm it uses
     header = jwt.get_unverified_header(token)
     alg = header.get("alg", "")
 
     if alg == "HS256":
-        # Old style: verify with the shared secret
         if not SUPABASE_JWT_SECRET:
             raise jwt.InvalidTokenError("HS256 token but no secret configured")
         return jwt.decode(
@@ -63,7 +66,6 @@ def decode_jwt(token: str) -> dict:
             options={"require": ["exp", "sub"]},
         )
     else:
-        # New style (ES256/RS256): verify with public key from Supabase
         signing_key = _jwk_client.get_signing_key_from_jwt(token)
         return jwt.decode(
             token,
@@ -104,13 +106,15 @@ def verify_token(token: str = Depends(get_bearer)) -> dict:
 
 
 def is_owner(payload: dict) -> bool:
-    """Fast-path check against OWNER_EMAILS only - used for rate-limit
-    exemption where a DB round-trip per request isn't worth it. This is
-    NOT the source of truth for admin actions; use require_role() for
-    anything that grants real privilege, since a role can diverge from
-    OWNER_EMAILS after manual promotion/demotion via the profiles table."""
+    """Fast-path check against OWNER_EMAILS and OWNER_USER_IDS.
+    Used for rate-limit exemption and project limit bypass.
+    NOTE: Supabase ES256 JWTs may not include email — always check sub too."""
     email = (payload or {}).get("email", "")
-    return bool(email) and email.strip().lower() in OWNER_EMAILS
+    sub = (payload or {}).get("sub", "")
+    return (
+        (bool(email) and email.strip().lower() in OWNER_EMAILS) or
+        (bool(sub) and sub in OWNER_USER_IDS)
+    )
 
 
 def get_user_role(user_id: str, email: str) -> str:
@@ -118,10 +122,10 @@ def get_user_role(user_id: str, email: str) -> str:
     the DB via the service-role client - never trusts a role claim from
     the client itself."""
     res = _admin().table("profiles").select("role").eq("id", user_id).execute()
-    if res.data:
-        return res.data[0]["role"]
+    data: list[dict[str, Any]] = res.data or []  # type: ignore[assignment]
+    if data:
+        return str(data[0].get("role", "member"))
 
-   
     role = "owner" if email.strip().lower() in OWNER_EMAILS else "member"
     _admin().table("profiles").insert({
         "id": user_id, "email": email, "role": role, "granted_by": None,
