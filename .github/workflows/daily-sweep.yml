@@ -37,4 +37,4 @@ jobs:
           GITHUB_REPO: ${{ secrets.ACE_REPO }}
         run: |
           cd ace-cli
-          python cli.py sweep --repo ${{ secrets.ACE_REPO }}
+          python cli.py sweep --repo $GITHUB_REPO
