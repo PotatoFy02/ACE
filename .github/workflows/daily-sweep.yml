@@ -2,8 +2,8 @@ name: ACE Daily IAM Sweep
 
 on:
   schedule:
-    - cron: '0 2 * * *'  # 2 AM UTC daily
-  workflow_dispatch:       # allow manual trigger
+    - cron: '0 2 * * *'
+  workflow_dispatch:
 
 jobs:
   sweep:
@@ -33,8 +33,8 @@ jobs:
           SLACK_SIGNING_SECRET: ${{ secrets.SLACK_SIGNING_SECRET }}
           SLACK_ALERT_CHANNEL: ${{ secrets.SLACK_ALERT_CHANNEL }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITHUB_REPO: ${{ secrets.GITHUB_REPO }}
           ACE_BASE_URL: ${{ secrets.ACE_BASE_URL }}
+          GITHUB_REPO: ${{ secrets.ACE_REPO }}
         run: |
           cd ace-cli
-          python cli.py sweep --repo ${{ secrets.GITHUB_REPO }}
+          python cli.py sweep --repo ${{ secrets.ACE_REPO }}
