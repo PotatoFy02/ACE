@@ -1316,10 +1316,15 @@ const Views = (() => {
           </div>
           <div class="row">
             ${isPaid()
-              ? `<button class="btn btn--sm" data-pdf="${escAttr(p.id)}" data-pdf-name="${escAttr(p.name)}">
+                            ? `<button class="btn btn--sm" data-pdf="${escAttr(p.id)}" data-pdf-name="${escAttr(p.name)}">
                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
                      <path d="M6 1v7M3.2 5.6 6 8.4l2.8-2.8M1.6 10.4h8.8" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round"/>
                    </svg> Download PDF
+                 </button>
+                 <button class="btn btn--sm" data-share="${escAttr(p.id)}" data-share-name="${escAttr(p.name)}">
+                   <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+                     <path d="M8 1.5a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3zM4 6a1.5 1.5 0 1 1 0 3A1.5 1.5 0 0 1 4 6zm4 1.5a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3zM6.5 3.5l-2 2m0 1l2 2" stroke="currentColor" stroke-width="1.35" stroke-linecap="round"/>
+                   </svg> Share
                  </button>`
               : `<button class="btn btn--aurum btn--sm magnetic" data-cta="evidence-row">Unlock</button>`}
           </div>
@@ -1383,7 +1388,22 @@ const Views = (() => {
   const skeletons = (n, h) => Array.from({ length: n },
     () => `<div class="skel" style="height:${h}px;border-radius:18px;margin-bottom:10px"></div>`).join('');
 
-  return { overview, roles, threats, evidence, pricing, renderResult, downloadPdf, threatCard };
+    async function shareVault(pid, name) {
+    if (!isPaid()) { Revenue.gate('share_link'); return; }
+    if (!jwt())    { Toast.show('Sign in first', 'err'); return; }
+    track('share_link_create', { project: pid });
+    Toast.show('Generating share link…');
+    try {
+      const data =await Gateway.mutate(`/api/projects/${encodeURIComponent(pid)}/share`, { body: { expires_days: 30 }, retries: 0 });
+      const url = data?.url || '';
+      await navigator.clipboard.writeText(url);
+      Toast.show('Share link copied to clipboard ✓', 'ok');
+    } catch (e) {
+      Toast.show(e.message || 'Could not create share link', 'err');
+    }
+  }
+
+  return { overview, roles, threats, evidence, pricing, renderResult, downloadPdf, threatCard, shareVault };
 })();
 
 /* ═══ 10 · CHROME ══════════════════════════════════════════════════════ */
@@ -1779,6 +1799,8 @@ function wireDelegation() {
     const pdf = t.closest('[data-pdf]');
     if (pdf) return Views.downloadPdf(pdf.dataset.pdf, pdf.dataset.pdfName);
 
+    const share = t.closest('[data-share]');
+    if (share) return Views.shareVault(share.dataset.share, share.dataset.shareName);
     if (t.closest('[data-signin]') || t.closest('#acct')) {
       if (Store.s.session) {
         if (confirm('Sign out of ACE?')) Auth.signOut();
