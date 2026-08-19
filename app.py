@@ -1,5 +1,5 @@
 # Copyright (c) 2026 Pot (PotatoFy02). All rights reserved.
-# ACE — Automated Cybersecurity Engine
+# ACE - Automated Cybersecurity Engine
 # Unauthorized commercial use prohibited. See LICENSE.
 import sys, os
 sys.path.append(os.path.join(os.path.dirname(__file__), "ace-cli"))
@@ -24,7 +24,8 @@ from iac_parser import parse_iac
 from db import (
     save_threat_model, list_projects, get_project, delete_project,
     count_projects, update_threat_status, update_remediation, project_stats,
-    get_evidence_rows,
+    get_evidence_rows, create_share_link, get_project_by_token,
+    list_share_links, delete_share_link,
 )
 from pdf import build_pdf, build_evidence_pdf
 from webhook import router as webhook_router
@@ -47,7 +48,7 @@ if _sentry_dsn:
     )
     log.info("Sentry initialised (environment=%s)", os.getenv("RENDER_GIT_BRANCH", "local"))
 else:
-    log.warning("SENTRY_DSN not set — error tracking disabled")
+    log.warning("SENTRY_DSN not set - error tracking disabled")
 
 FREE_PROJECT_LIMIT = int(os.getenv("FREE_PROJECT_LIMIT", "3"))
 ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "http://localhost:8000").split(",")
@@ -142,6 +143,19 @@ class RemediationUpdate(BaseModel):
 
 class RoleUpdateRequest(BaseModel):
     role: str
+
+
+class ShareLinkRequest(BaseModel):
+    expires_days: int = Field(30, ge=1, le=365)
+
+
+class DriftPayload(BaseModel):
+    sha: str
+    ref: str
+    repo: str
+    total_excess: int
+    high_risk_actions: list[str] = []
+    drift_detected: bool = False
 
 
 @app.get("/api/health")
@@ -442,6 +456,113 @@ def set_user_role(request: Request, target_user_id: str, body: RoleUpdateRequest
         raise HTTPException(400, f"Invalid role. Must be one of {list(ROLE_RANK)}")
     _admin().table("profiles").update({"role": body.role}).eq("id", target_user_id).execute()
     return {"status": "updated", "target_user_id": target_user_id, "role": body.role}
+
+
+# ── Share links ───────────────────────────────────────────────────────────────
+
+@app.post("/api/projects/{pid}/share")
+@limiter.limit("20/hour")
+def create_share(request: Request, pid: str, body: ShareLinkRequest,
+                 user=Depends(verify_token), jwt=Depends(get_bearer)):
+    data = get_project(jwt, pid)
+    if not data["project"]:
+        raise HTTPException(404, "Not found.")
+    try:
+        link = create_share_link(jwt, user["sub"], pid, body.expires_days)
+        base = os.getenv("ACE_BASE_URL", "").rstrip("/")
+        return {
+            "token": link["token"],
+            "expires_at": link["expires_at"],
+            "url": f"{base}/#/vault/share/{link['token']}",
+        }
+    except Exception:
+        log.exception("create share link failed")
+        raise HTTPException(500, "Internal error.")
+
+
+@app.get("/api/projects/{pid}/share")
+@limiter.limit("60/minute")
+def list_shares(request: Request, pid: str,
+                user=Depends(verify_token), jwt=Depends(get_bearer)):
+    try:
+        return list_share_links(jwt, pid)
+    except Exception:
+        log.exception("list share links failed")
+        raise HTTPException(500, "Internal error.")
+
+
+@app.delete("/api/share/{link_id}")
+@limiter.limit("30/minute")
+def revoke_share(request: Request, link_id: str,
+                 user=Depends(verify_token), jwt=Depends(get_bearer)):
+    try:
+        delete_share_link(jwt, link_id)
+        return {"deleted": link_id}
+    except Exception:
+        log.exception("delete share link failed")
+        raise HTTPException(500, "Internal error.")
+
+
+@app.get("/api/vault/share/{token}")
+@limiter.limit("60/minute")
+def public_share(request: Request, token: str):
+    try:
+        data = get_project_by_token(token)
+    except Exception:
+        log.exception("public share lookup failed")
+        raise HTTPException(500, "Internal error.")
+    if data.get("expired"):
+        raise HTTPException(410, "This share link has expired.")
+    if not data["project"]:
+        raise HTTPException(404, "Share link not found.")
+    project = data["project"]
+    project.pop("architecture_description", None)
+    project.pop("model_json", None)
+    return {"project": project, "threats": data["threats"]}
+
+
+# ── Drift detection ───────────────────────────────────────────────────────────
+
+@app.post("/api/drift/ingest")
+@limiter.limit("100/hour")
+async def drift_ingest(request: Request, body: DriftPayload):
+    service_key = request.headers.get("X-ACE-Service-Key", "")
+    if service_key != os.getenv("SUPABASE_SERVICE_KEY", ""):
+        raise HTTPException(401, "Invalid service key.")
+    from supabase import create_client
+    c = create_client(
+        os.getenv("SUPABASE_URL", ""),
+        os.getenv("SUPABASE_SERVICE_KEY", ""),
+    )
+    c.table("audit_log").insert({
+        "user_id": None,
+        "action": "drift_detected" if body.drift_detected else "drift_clean",
+        "resource_type": "repo",
+        "resource_id": body.repo,
+        "metadata": {
+            "sha": body.sha,
+            "ref": body.ref,
+            "total_excess": body.total_excess,
+            "high_risk_actions": body.high_risk_actions,
+        },
+    }).execute()
+    if body.drift_detected and body.high_risk_actions:
+        import httpx
+        slack_url = os.getenv("SLACK_WEBHOOK_URL", "")
+        if slack_url:
+            try:
+                async with httpx.AsyncClient(timeout=5) as hc:
+                    await hc.post(slack_url, json={
+                        "text": (
+                            f"🚨 *ACE Drift Detected* on `{body.repo}` @ `{body.sha[:7]}`\n"
+                            f"*{body.total_excess} excess permissions* — "
+                            f"{len(body.high_risk_actions)} HIGH risk: "
+                            f"`{'`, `'.join(body.high_risk_actions[:5])}`"
+                        )
+                    })
+            except Exception:
+                log.warning("Slack drift alert failed", exc_info=True)
+    return {"ok": True, "drift_detected": body.drift_detected}
 
 
 app.mount("/", StaticFiles(directory="static", html=True), name="static")

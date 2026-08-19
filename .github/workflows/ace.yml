@@ -1,6 +1,11 @@
 name: ACE — Privilege Analysis
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - '**.py'
+      - '**.tf'
   pull_request:
     branches: [main]
     paths:
@@ -19,6 +24,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
 
       - name: Build ace-cli
         run: docker build -t ace-cli ./ace-cli
@@ -31,7 +38,64 @@ jobs:
             --json > ace_output.json
           cat ace_output.json
 
+      - name: Detect drift (push only)
+        if: github.event_name == 'push'
+        env:
+          ACE_BASE_URL: ${{ secrets.ACE_BASE_URL }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: |
+          python - <<'EOF'
+          import json, os, urllib.request, urllib.error
+
+          with open('ace_output.json') as f:
+              data = json.load(f)
+
+          total_excess = sum(len(d.get('excess', [])) for d in data)
+          high_risk = [
+              e['action_iam']
+              for d in data
+              for e in d.get('excess', [])
+              if e.get('severity') == 'high'
+          ]
+
+          payload = json.dumps({
+              "sha": os.environ['GITHUB_SHA'],
+              "ref": os.environ['GITHUB_REF'],
+              "repo": os.environ['GITHUB_REPOSITORY'],
+              "total_excess": total_excess,
+              "high_risk_actions": high_risk,
+              "drift_detected": total_excess > 0,
+          }).encode()
+
+          base_url = os.environ.get('ACE_BASE_URL', '').rstrip('/')
+          req = urllib.request.Request(
+              f"{base_url}/api/drift/ingest",
+              data=payload,
+              headers={
+                  "Content-Type": "application/json",
+                  "X-ACE-Service-Key": os.environ.get('SUPABASE_SERVICE_KEY', ''),
+              },
+              method='POST',
+          )
+          try:
+              with urllib.request.urlopen(req, timeout=10) as resp:
+                  print("Drift ingested:", resp.read().decode())
+          except urllib.error.HTTPError as e:
+              print(f"Drift ingest warning: {e.code} {e.read().decode()}")
+          except Exception as e:
+              print(f"Drift ingest skipped: {e}")
+
+          if total_excess > 0:
+              print(f"DRIFT DETECTED: {total_excess} excess permissions")
+              if high_risk:
+                  print("HIGH RISK:", high_risk)
+          else:
+              print("No drift detected.")
+          EOF
+
       - name: Post PR comment
+        if: github.event_name == 'pull_request'
         id: comment
         uses: actions/github-script@v7
         with:
@@ -76,7 +140,7 @@ jobs:
             core.exportVariable('RED_ROLES', JSON.stringify(redRoles));
 
       - name: Check approvals for red-risk roles
-        if: env.RED_ROLES != '[]' && env.RED_ROLES != ''
+        if: github.event_name == 'pull_request' && env.RED_ROLES != '[]' && env.RED_ROLES != ''
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}

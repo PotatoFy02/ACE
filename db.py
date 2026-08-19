@@ -1,7 +1,9 @@
 ﻿# Copyright (c) 2026 Pot (PotatoFy02). All rights reserved.
-# ACE � Automated Cybersecurity Engine
+# ACE - Automated Cybersecurity Engine
 import logging
+from datetime import datetime, timedelta, timezone
 from typing import Any
+
 from config import settings
 from db_helpers import make_client, parse_rows, parse_row, safe_id
 from models_db import ProjectRow, ThreatRow, MitigationRow, EvidenceRow, StatsRow
@@ -26,7 +28,7 @@ def save_threat_model(user_jwt: str, user_id: str, name: str, desc: str, model: 
 
     pid = safe_id(project_res.data)
     if not pid:
-        raise ValueError("Failed to save project � no id returned")
+        raise ValueError("Failed to save project - no id returned")
 
     for t in model.threats:
         threat_res = c.table("threats").insert({
@@ -57,7 +59,7 @@ def count_projects(user_jwt: str) -> int:
     result = (
         _c(user_jwt)
         .table("projects")
-        .select("id", count="exact")  # type: ignore[call-overload] � supabase-py CountMethod typing incomplete
+        .select("id", count="exact")  # type: ignore[call-overload]
         .execute()
     )
     return result.count or 0
@@ -216,13 +218,12 @@ def get_evidence_rows(user_jwt: str, pid: str) -> list[dict[str, Any]]:
 
     rows = parse_rows(result.data, EvidenceRow)
 
-    # Fan-out guard � deduplicate by role_arn before building PDF
     seen: set[str] = set()
     deduped: list[EvidenceRow] = []
     for row in rows:
         if row.ace_role_arn in seen:
             log.error(
-                "Fan-out detected for role %s � skipping duplicate. "
+                "Fan-out detected for role %s - skipping duplicate. "
                 "Check approvals UNIQUE constraint.",
                 row.ace_role_arn,
             )
@@ -231,3 +232,66 @@ def get_evidence_rows(user_jwt: str, pid: str) -> list[dict[str, Any]]:
         deduped.append(row)
 
     return [r.model_dump() for r in deduped]
+
+
+# ── Share links ───────────────────────────────────────────────────────────────
+
+def create_share_link(user_jwt: str, user_id: str, pid: str, expires_days: int = 30) -> dict[str, Any]:
+    c = _c(user_jwt)
+    expires_at = (datetime.now(timezone.utc) + timedelta(days=expires_days)).isoformat()
+    res = c.table("share_links").insert({
+        "project_id": pid,
+        "created_by": user_id,
+        "expires_at": expires_at,
+    }).execute()
+    data: list[dict[str, Any]] = res.data or []  # type: ignore[assignment]
+    row = data[0] if data else {}
+    return {"token": row.get("token"), "expires_at": row.get("expires_at")}
+
+
+def get_project_by_token(token: str) -> dict[str, Any]:
+    from supabase import create_client
+    c = create_client(settings.supabase_url, settings.supabase_anon_key)
+    link_res = c.table("share_links").select("*").eq("token", token).maybe_single().execute()
+    link: dict[str, Any] = link_res.data or {}  # type: ignore[assignment]
+    if not link:
+        return {"project": None, "threats": []}
+    expires = link.get("expires_at")
+    if expires:
+        exp = datetime.fromisoformat(str(expires).replace("Z", "+00:00"))
+        if datetime.now(timezone.utc) > exp:
+            return {"project": None, "threats": [], "expired": True}
+    pid = str(link.get("project_id", ""))
+    p_res = c.table("projects").select("*").eq("id", pid).maybe_single().execute()
+    project = parse_row(p_res.data if p_res else None, ProjectRow)
+    if not project:
+        return {"project": None, "threats": []}
+    t_res = c.table("threats").select("*").eq("project_id", pid).execute()
+    threats = parse_rows(t_res.data, ThreatRow)
+    threat_dicts = []
+    for t in threats:
+        td = t.model_dump()
+        m_res = c.table("mitigations").select("*").eq("threat_id", t.id).execute()
+        mitigations = parse_rows(m_res.data, MitigationRow)
+        td["mitigations"] = [m.model_dump() for m in mitigations]
+        fw: dict[str, Any] = td.get("frameworks") or {}
+        td["iso27001_control"] = fw.get("iso27001", "")
+        td["nist_control"] = fw.get("nist", "")
+        threat_dicts.append(td)
+    return {"project": project.model_dump(), "threats": threat_dicts}
+
+
+def list_share_links(user_jwt: str, pid: str) -> list[dict[str, Any]]:
+    res = (
+        _c(user_jwt)
+        .table("share_links")
+        .select("id, token, expires_at, created_at")
+        .eq("project_id", pid)
+        .order("created_at", desc=True)
+        .execute()
+    )
+    return res.data or []  # type: ignore[return-value]
+
+
+def delete_share_link(user_jwt: str, link_id: str) -> None:
+    _c(user_jwt).table("share_links").delete().eq("id", link_id).execute()

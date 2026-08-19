@@ -1,10 +1,25 @@
 ﻿# Copyright (c) 2026 Pot (PotatoFy02). All rights reserved.
 # ACE - Automated Cybersecurity Engine
 # Central environment variable validation. App refuses to start if vars missing.
-from pydantic_settings import BaseSettings
+# -*- coding: utf-8 -*-
+# Copyright (c) 2026 Pot (PotatoFy02). All rights reserved.
+# ACE - Automated Cybersecurity Engine
+# Central environment variable validation. App refuses to start if vars missing.
+from pathlib import Path
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# regardless of which directory the process is launched from.
+_ENV_FILE = Path(__file__).parent / ".env"
 
 
 class Settings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_file=str(_ENV_FILE),
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+        extra="ignore",
+    )
+
     supabase_url: str
     supabase_anon_key: str
     supabase_service_key: str = ""
@@ -23,12 +38,6 @@ class Settings(BaseSettings):
     free_project_limit: int = 10
     allowed_origins: str = "http://localhost:8000"
     render_git_branch: str = "local"
-
-    class Config:
-        env_file = ".env"
-        env_file_encoding = "utf-8"
-        case_sensitive = False
-        extra = "ignore"
 
 
 settings = Settings()  # type: ignore[call-arg]
