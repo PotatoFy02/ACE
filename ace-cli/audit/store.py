@@ -135,7 +135,7 @@ async def log_event(event: AuditEvent) -> UUID:
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
             """
-            INSERT INTO audit_log
+            INSERT INTO ace_audit_log
                 (event_type, actor, scan_id, patch_id, metadata)
             VALUES ($1,$2,$3,$4,$5::jsonb)
             RETURNING id, created_at
@@ -172,7 +172,7 @@ async def get_audit_trail(
 
     async with pool.acquire() as conn:
         rows = await conn.fetch(
-            f"SELECT * FROM audit_log {where} ORDER BY created_at DESC LIMIT ${len(params)}",
+            f"SELECT * FROM ace_audit_log {where} ORDER BY created_at DESC LIMIT ${len(params)}",
             *params,
         )
 
@@ -204,14 +204,14 @@ async def get_flagged_roles_past_cooling_off(cooling_off_days: int = 14) -> list
             """
             SELECT DISTINCT ON (metadata->>'role_arn')
                 id, metadata, created_at
-            FROM audit_log
+            FROM ace_audit_log
             WHERE event_type = 'sweeper_flagged'
               AND created_at < now() - ($1 || ' days')::INTERVAL
               AND NOT EXISTS (
-                  SELECT 1 FROM audit_log ack
+                  SELECT 1 FROM ace_audit_log ack
                   WHERE ack.event_type    = 'sweeper_acknowledged'
-                    AND ack.metadata->>'role_arn' = audit_log.metadata->>'role_arn'
-                    AND ack.created_at    > audit_log.created_at
+                    AND ack.metadata->>'role_arn' = ace_audit_log.metadata->>'role_arn'
+                    AND ack.created_at    > ace_audit_log.created_at
               )
             ORDER BY metadata->>'role_arn', created_at DESC
             """,

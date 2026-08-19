@@ -13,6 +13,7 @@ import os
 import time
 import urllib.parse
 
+import httpx
 from fastapi import APIRouter, Header, HTTPException, Request
 from supabase import create_client
 
@@ -25,6 +26,8 @@ SLACK_SIGNING_SECRET  = os.environ.get("SLACK_SIGNING_SECRET", "")
 AUTHORIZED_APPROVERS  = set(
     filter(None, os.environ.get("AUTHORIZED_APPROVERS", "").split(","))
 )
+GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN", "")
+GITHUB_REPO  = os.environ.get("GITHUB_REPO", "")  # e.g. PotatoFy02/ACE
 
 
 def _service_client():
@@ -76,6 +79,94 @@ def _reject_replay(delivery_id: str) -> None:
             log.info(f"Replay rejected: delivery {delivery_id} already processed")
             raise HTTPException(status_code=200, detail="already_processed")
         raise
+
+
+async def _open_reduction_pr(role_arn: str) -> str | None:
+    """
+    Opens a GitHub PR to reduce permissions for the given IAM role ARN.
+    Returns the PR URL on success, None on failure.
+    """
+    if not GITHUB_TOKEN or not GITHUB_REPO:
+        log.error("GITHUB_TOKEN or GITHUB_REPO not set — cannot open PR")
+        return None
+
+    headers = {
+        "Authorization": f"Bearer {GITHUB_TOKEN}",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+
+    # Sanitize ARN into a valid branch name
+    safe_arn = (
+        role_arn.replace(":", "-")
+                .replace("/", "-")
+                .replace("_", "-")
+                .lower()
+    )
+    branch_name = f"ace/reduce-{safe_arn}"[:100]
+
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            # 1. Get default branch SHA
+            repo_resp = await client.get(
+                f"https://api.github.com/repos/{GITHUB_REPO}",
+                headers=headers,
+            )
+            repo_resp.raise_for_status()
+            default_branch = repo_resp.json()["default_branch"]
+
+            ref_resp = await client.get(
+                f"https://api.github.com/repos/{GITHUB_REPO}/git/ref/heads/{default_branch}",
+                headers=headers,
+            )
+            ref_resp.raise_for_status()
+            base_sha = ref_resp.json()["object"]["sha"]
+
+            # 2. Create branch (422 = already exists, that's fine)
+            branch_resp = await client.post(
+                f"https://api.github.com/repos/{GITHUB_REPO}/git/refs",
+                headers=headers,
+                json={"ref": f"refs/heads/{branch_name}", "sha": base_sha},
+            )
+            if branch_resp.status_code not in (201, 422):
+                branch_resp.raise_for_status()
+
+            # 3. Open PR
+            pr_resp = await client.post(
+                f"https://api.github.com/repos/{GITHUB_REPO}/pulls",
+                headers=headers,
+                json={
+                    "title": f"ACE: Reduce permissions for {role_arn}",
+                    "body": (
+                        f"Automatically opened by ACE Sweeper after Slack approval.\n\n"
+                        f"**Role ARN:** `{role_arn}`\n"
+                        f"**Action:** Reduce to least-privilege based on last-used activity.\n\n"
+                        f"Review and merge to complete the remediation."
+                    ),
+                    "head": branch_name,
+                    "base": default_branch,
+                },
+            )
+
+            # 422 = PR already exists for this branch
+            if pr_resp.status_code == 422:
+                existing = await client.get(
+                    f"https://api.github.com/repos/{GITHUB_REPO}/pulls",
+                    headers=headers,
+                    params={
+                        "head": f"{GITHUB_REPO.split('/')[0]}:{branch_name}",
+                        "state": "open",
+                    },
+                )
+                prs = existing.json()
+                return prs[0]["html_url"] if prs else None
+
+            pr_resp.raise_for_status()
+            return pr_resp.json()["html_url"]
+
+    except Exception as e:
+        log.error(f"_open_reduction_pr failed for {role_arn}: {e}", exc_info=True)
+        return None
 
 
 @router.post("/github")
@@ -193,9 +284,25 @@ async def slack_interactions(
             _service_client().table("sweeper_roles").update({
                 "state": "PR_OPEN",
             }).eq("role_arn", role_arn).execute()
-            log.info(f"Role {role_arn} approved for PR by {user}")
+            log.info(f"Role {role_arn} state set to PR_OPEN by {user}")
         except Exception as e:
-            log.error(f"Failed to approve role {role_arn}: {e}")
+            log.error(f"Failed to update role state {role_arn}: {e}")
             raise HTTPException(status_code=500, detail="Failed to update role")
+
+        pr_url = await _open_reduction_pr(role_arn)
+
+        if pr_url:
+            try:
+                _service_client().table("sweeper_roles").update({
+                    "pr_url": pr_url,
+                }).eq("role_arn", role_arn).execute()
+                log.info(f"PR opened for {role_arn}: {pr_url}")
+            except Exception as e:
+                log.error(f"Failed to save pr_url for {role_arn}: {e}")
+
+            return {"text": f"✅ Approved. PR opened: {pr_url}"}
+        else:
+            log.error(f"PR creation failed for {role_arn}")
+            return {"text": f"✅ Approved. State updated to PR_OPEN but PR creation failed — check logs."}
 
     return {"text": f"Action `{action_id}` recorded for `{role_arn}` by {user}."}

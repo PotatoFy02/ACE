@@ -34,7 +34,7 @@ CREATE TABLE IF NOT EXISTS patches (
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE TABLE IF NOT EXISTS audit_log (
+CREATE TABLE IF NOT EXISTS ace_audit_log (
     id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     event_type  TEXT NOT NULL,
     actor       TEXT,
@@ -48,13 +48,13 @@ CREATE INDEX IF NOT EXISTS idx_scans_commit    ON scans(commit_sha);
 CREATE INDEX IF NOT EXISTS idx_scans_repo      ON scans(repo);
 CREATE INDEX IF NOT EXISTS idx_patches_scan    ON patches(scan_id);
 CREATE INDEX IF NOT EXISTS idx_patches_role    ON patches(role_arn);
-CREATE INDEX IF NOT EXISTS idx_audit_event     ON audit_log(event_type);
-CREATE INDEX IF NOT EXISTS idx_audit_scan      ON audit_log(scan_id);
-CREATE INDEX IF NOT EXISTS idx_audit_created   ON audit_log(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_event     ON ace_audit_log(event_type);
+CREATE INDEX IF NOT EXISTS idx_audit_scan      ON ace_audit_log(scan_id);
+CREATE INDEX IF NOT EXISTS idx_audit_created   ON ace_audit_log(created_at DESC);
 """
 
 ROLLBACK_SQL = """
-DROP TABLE IF EXISTS audit_log CASCADE;
+DROP TABLE IF EXISTS ace_audit_log CASCADE;
 DROP TABLE IF EXISTS patches   CASCADE;
 DROP TABLE IF EXISTS scans     CASCADE;
 """

@@ -24,7 +24,7 @@ async def run_migration(rollback: bool = False, check: bool = False):
                 """
                 SELECT tablename FROM pg_tables
                 WHERE schemaname = 'public'
-                  AND tablename IN ('scans','patches','audit_log')
+                  AND tablename IN ('scans','patches','ace_audit_log')
                 ORDER BY tablename
                 """
             )
@@ -41,7 +41,7 @@ async def run_migration(rollback: bool = False, check: bool = False):
             print("Rollback complete.")
         else:
             await conn.execute(MIGRATION_SQL)
-            print("Migration complete. Tables: scans, patches, audit_log")
+            print("Migration complete. Tables: scans, patches, ace_audit_log")
     finally:
         await conn.close()
 

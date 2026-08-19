@@ -46,7 +46,9 @@ async def clean_tables():
     """Wipe rows between every test. Keep schema."""
     yield
     conn = await asyncpg.connect(DSN)
-    await conn.execute("DELETE FROM audit_log; DELETE FROM patches; DELETE FROM scans;")
+    await conn.execute(
+        "DELETE FROM ace_audit_log; DELETE FROM patches; DELETE FROM scans;"
+    )
     await conn.close()
 
 
@@ -63,7 +65,7 @@ async def reset_pool():
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def make_scan(**kwargs) -> ScanRecord:
-    defaults = dict(
+    defaults: dict = dict(
         repo="test-org/repo",
         commit_sha=str(uuid.uuid4())[:8],
         unknown_rate=0.0,
@@ -81,12 +83,12 @@ async def test_migration_creates_tables():
         """
         SELECT tablename FROM pg_tables
         WHERE schemaname = 'public'
-          AND tablename IN ('scans','patches','audit_log')
+          AND tablename IN ('scans', 'patches', 'ace_audit_log')
         ORDER BY tablename
         """
     )
     await conn.close()
-    assert {r["tablename"] for r in rows} == {"audit_log", "patches", "scans"}
+    assert {r["tablename"] for r in rows} == {"ace_audit_log", "patches", "scans"}
 
 
 # ── Scans ─────────────────────────────────────────────────────────────────────
@@ -106,6 +108,7 @@ async def test_insert_and_get_scan():
     assert isinstance(scan_id, UUID)
 
     fetched = await get_scan(scan_id)
+    assert fetched is not None
     assert fetched["repo"] == "test-org/test-repo"
     assert fetched["commit_sha"] == "abc123"
     assert float(fetched["unknown_rate"]) == 6.3
