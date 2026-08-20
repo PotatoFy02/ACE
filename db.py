@@ -295,3 +295,29 @@ def list_share_links(user_jwt: str, pid: str) -> list[dict[str, Any]]:
 
 def delete_share_link(user_jwt: str, link_id: str) -> None:
     _c(user_jwt).table("share_links").delete().eq("id", link_id).execute()
+
+
+# ── All threats (optimized single query) ─────────────────────────────────────
+
+def get_all_threats(user_jwt: str) -> list[dict[str, Any]]:
+    """Returns all threats across all projects in one query."""
+    c = _c(user_jwt)
+    t_res = (
+        c.table("threats")
+        .select("*, projects(id, name)")
+        .order("created_at", desc=True)
+        .limit(500)
+        .execute()
+    )
+    threats: list[dict[str, Any]] = t_res.data or []  # type: ignore[assignment]
+    result = []
+    for t in threats:
+        td = dict(t)  # type: ignore[arg-type]
+        project = td.pop("projects", {}) or {}
+        td["_project"] = project.get("name", "")
+        td["_pid"] = project.get("id", "")
+        fw: dict[str, Any] = td.get("frameworks") or {}
+        td["iso27001_control"] = fw.get("iso27001", "")
+        td["nist_control"] = fw.get("nist", "")
+        result.append(td)
+    return result

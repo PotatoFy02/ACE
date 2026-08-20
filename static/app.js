@@ -1776,6 +1776,7 @@ function wireDelegation() {
     const cta = t.closest('[data-cta]');
     if (cta) {
       track('upgrade_click', { source: cta.dataset.cta });
+      if (Store.s.session?.user?.id === '12bf945d-60be-4141-800e-e5bb4c678799') return;
       const map = { 'rail-quota': 'scan_quota', 'evidence-row': 'evidence',
                     'threat-banner': 'scan_quota', 'post-analysis': 'scan_quota' };
       const key = map[cta.dataset.cta] ||

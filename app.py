@@ -25,7 +25,7 @@ from db import (
     save_threat_model, list_projects, get_project, delete_project,
     count_projects, update_threat_status, update_remediation, project_stats,
     get_evidence_rows, create_share_link, get_project_by_token,
-    list_share_links, delete_share_link,
+    list_share_links, delete_share_link, get_all_threats,
 )
 from pdf import build_pdf, build_evidence_pdf
 from webhook import router as webhook_router
@@ -50,7 +50,7 @@ if _sentry_dsn:
 else:
     log.warning("SENTRY_DSN not set - error tracking disabled")
 
-FREE_PROJECT_LIMIT = int(os.getenv("FREE_PROJECT_LIMIT", "3"))
+FREE_PROJECT_LIMIT = int(os.getenv("FREE_PROJECT_LIMIT", "10"))
 ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "http://localhost:8000").split(",")
 MAX_BODY = 25000
 MAX_UPLOAD = 120000
@@ -397,6 +397,16 @@ def export_evidence_pdf(
         media_type="application/pdf",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'}
     )
+
+
+@app.get("/api/threats")
+@limiter.limit("60/minute")
+def all_threats(request: Request, user=Depends(verify_token), jwt=Depends(get_bearer)):
+    try:
+        return get_all_threats(jwt)
+    except Exception:
+        log.exception("all threats failed")
+        raise HTTPException(500, "Internal error.")
 
 
 @app.get("/api/ace/sweeper-status")
