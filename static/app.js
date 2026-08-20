@@ -967,7 +967,7 @@ const Views = (() => {
         { scope: 'overview', force, onFresh: () => overview(false) }
       );
 
-      const projects = (pRes.ok && pRes.data?.projects) || [];
+      const projects = (pRes.ok && (Array.isArray(pRes.data) ? pRes.data : pRes.data?.projects)) || [];
       const roles    = (rRes.ok && rRes.data?.roles)    || [];
       Store.set({ projects, roles });
 
@@ -1119,7 +1119,7 @@ const Views = (() => {
 
     try {
       const data = await Gateway.get('/api/projects', { scope: 'threats', force });
-      const projects = data?.projects || [];
+      const projects = Array.isArray(data) ? data : (data?.projects || []);
       Store.set({ projects });
       syncFilter(projects);
 
@@ -1291,7 +1291,7 @@ const Views = (() => {
 
     try {
       const data = await Gateway.get('/api/projects', { scope: 'evidence', force });
-      const projects = data?.projects || [];
+      const projects = Array.isArray(data) ? data : (data?.projects || []);
       Store.set({ projects });
       Revenue.paintValue();
 
