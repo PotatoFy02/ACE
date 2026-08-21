@@ -300,11 +300,11 @@ def delete_share_link(user_jwt: str, link_id: str) -> None:
 # ── All threats (optimized single query) ─────────────────────────────────────
 
 def get_all_threats(user_jwt: str) -> list[dict[str, Any]]:
-    """Returns all threats across all projects in one query."""
+    """Returns all threats across all projects in one query including mitigations."""
     c = _c(user_jwt)
     t_res = (
         c.table("threats")
-        .select("*, projects(id, name)")
+        .select("*, projects(id, name), mitigations(id, description)")
         .order("created_at", desc=True)
         .limit(500)
         .execute()
@@ -319,5 +319,7 @@ def get_all_threats(user_jwt: str) -> list[dict[str, Any]]:
         fw: dict[str, Any] = td.get("frameworks") or {}
         td["iso27001_control"] = fw.get("iso27001", "")
         td["nist_control"] = fw.get("nist", "")
+        mitigations = td.get("mitigations") or []
+        td["mitigations"] = [{"id": m.get("id"), "description": m.get("description")} for m in mitigations]  # type: ignore[union-attr]
         result.append(td)
     return result

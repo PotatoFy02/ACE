@@ -859,6 +859,15 @@ select option { background:#0C0F18; color:var(--ink); }
         New Analysis
       </div>
 
+            <div class="nav-i" data-view="projects" role="button" tabindex="0">
+        <svg class="ic" viewBox="0 0 15 15" fill="none" aria-hidden="true">
+          <rect x="1.2" y="1.2" width="12.6" height="3.8" rx="1.2" stroke="currentColor" stroke-width="1.15"/>
+          <rect x="1.2" y="6.5" width="12.6" height="3.8" rx="1.2" stroke="currentColor" stroke-width="1.15"/>
+          <rect x="1.2" y="11.8" width="7.2" height="2" rx="1" stroke="currentColor" stroke-width="1.15"/>
+        </svg>
+        Projects
+      </div>
+
       <div class="rubric">Compliance</div>
 
       <div class="nav-i" data-view="evidence" role="button" tabindex="0">
@@ -1083,6 +1092,22 @@ select option { background:#0C0F18; color:var(--ink); }
     </section>
 
     <!-- ── EVIDENCE ─────────────────────────────────────────────────── -->
+        <section class="view" id="v-projects" aria-labelledby="h-projects">
+      <div class="masthead">
+        <div>
+          <div class="eyebrow">Workspace</div>
+          <h1 class="title" id="h-projects">Projects</h1>
+          <p class="dek">All saved analyses. View threats or delete projects you no longer need.</p>
+        </div>
+        <button class="btn btn--primary magnetic" data-go="generate">New analysis</button>
+      </div>
+      <div id="projects-list" aria-live="polite">
+        <div class="skel" style="height:72px;border-radius:18px;margin-bottom:10px"></div>
+        <div class="skel" style="height:72px;border-radius:18px;margin-bottom:10px"></div>
+        <div class="skel" style="height:72px;border-radius:18px"></div>
+      </div>
+    </section>
+
     <section class="view" id="v-evidence" aria-labelledby="h-evidence">
       <div class="masthead">
         <div>
