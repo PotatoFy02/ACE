@@ -1811,7 +1811,17 @@ function wireDelegation() {
     if (nav) return Router.go(nav.dataset.view);
 
     const go = t.closest('[data-go]');
-    if (go) return Router.go(go.dataset.go);
+    if (go) {
+      const projectFilter = go.dataset.projectFilter;
+      Router.go(go.dataset.go);
+      if (projectFilter) {
+        setTimeout(() => {
+          const sel = $('#filter-project');
+          if (sel) { sel.value = projectFilter; sel.dispatchEvent(new Event('change')); }
+        }, 100);
+      }
+      return;
+    }
 
     const reload = t.closest('[data-reload]');
     if (reload) {
