@@ -1,0 +1,20 @@
+<svg width="300" height="260" viewBox="0 0 300 260" xmlns="http://www.w3.org/2000/svg">
+  <rect width="300" height="260" fill="#0d0f1a"/>
+
+  <!-- Vertical letterform -->
+  <text font-family="Georgia, 'Times New Roman', serif" font-size="64" font-weight="700" fill="#ffffff" x="60" y="80" text-anchor="middle">A</text>
+  <text font-family="Georgia, 'Times New Roman', serif" font-size="50" font-weight="400" fill="#5B7FFF" x="60" y="138" text-anchor="middle">&amp;</text>
+  <circle cx="60" cy="118" r="18" fill="none" stroke="#5B7FFF" stroke-width="1.2" opacity="0.6"/>
+  <line x1="60" y1="100" x2="60" y2="136" stroke="#5B7FFF" stroke-width="1" opacity="0.5"/>
+  <line x1="42" y1="118" x2="78" y2="118" stroke="#5B7FFF" stroke-width="1" opacity="0.5"/>
+  <text font-family="Georgia, 'Times New Roman', serif" font-size="64" font-weight="700" fill="#ffffff" x="60" y="196" text-anchor="middle">C</text>
+  <text font-family="Georgia, 'Times New Roman', serif" font-size="64" font-weight="700" fill="#ffffff" x="60" y="254" text-anchor="middle">E</text>
+
+  <!-- Vertical separator -->
+  <line x1="100" y1="30" x2="100" y2="240" stroke="#5B7FFF" stroke-width="1" opacity="0.35"/>
+
+  <!-- Descriptor -->
+  <text font-family="Arial, sans-serif" fill="#ffffff" font-size="11" letter-spacing="3" x="118" y="118" font-weight="300">AUTOMATED</text>
+  <text font-family="Arial, sans-serif" fill="#ffffff" font-size="11" letter-spacing="3" x="118" y="138" font-weight="300">CYBERSECURITY</text>
+  <text font-family="Arial, sans-serif" fill="#5B7FFF" font-size="11" letter-spacing="3" x="118" y="158" font-weight="300">ENGINE</text>
+</svg>
