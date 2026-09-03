@@ -25,7 +25,8 @@
 const SUPABASE_URL = 'https://ubldspvbpejtnxniqvne.supabase.co';
 const SUPABASE_ANON_KEY =
   'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVibGRzcHZicGVqdG54bmlxdm5lIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI5ODU2OTEsImV4cCI6MjA5ODU2MTY5MX0.p9XbrjMnQuHmdk1erB5wWrpnw4D5APpdxoe-M0S2-10';
-
+const OWNER_IDS = new Set((typeof __OWNER_IDS__ !== 'undefined' ? __OWNER_IDS__ : '12bf945d-60be-4141-800e-e5bb4c678799').split(',').map(s => s.trim()));
+const isOwnerSession = () => OWNER_IDS.has(Store?.s?.session?.user?.id || '');
 const CFG = {
   freeScans:        10,
   freeAnonDemos:    1,
@@ -771,7 +772,7 @@ const Revenue = (() => {
           cta = $('#quota-cta'), tag = $('#tag-plan');
     if (!box) return;
 
-    if (isPaid() || Store.s.session?.user?.id === '12bf945d-60be-4141-800e-e5bb4c678799') {
+    if (isPaid() || isOwnerSession()) {
       const name = PLANS.find((p) => p.id === Store.s.plan)?.name || 'Owner';
       box.className = 'quota';
       val.textContent = 'Unlimited';
@@ -793,7 +794,7 @@ const Revenue = (() => {
 
   function consumeScan() {
     if (isPaid()) return true;
-    if (Store.s.session?.user?.id === '12bf945d-60be-4141-800e-e5bb4c678799') return true;
+    if (isOwnerSession()) return true;
     if (scansLeft() <= 0) { gate('scan_quota'); return false; }
     Store.set({ scansUsed: Store.s.scansUsed + 1 });
     const uid = Store.s.session?.user?.id || 'anon';
@@ -1330,7 +1331,7 @@ const Views = (() => {
           </div>
         </div>`;
 
-       const ownerAccess = isPaid() || Store.s.session?.user?.id === '12bf945d-60be-4141-800e-e5bb4c678799';
+       const ownerAccess = isPaid() || isOwnerSession();
       if (ownerAccess) {
         el.innerHTML = `<div class="stagger">${projects.map(card).join('')}</div>`;
       } else {
@@ -1833,7 +1834,7 @@ function wireDelegation() {
     const cta = t.closest('[data-cta]');
     if (cta) {
       track('upgrade_click', { source: cta.dataset.cta });
-      if (Store.s.session?.user?.id === '12bf945d-60be-4141-800e-e5bb4c678799') return;
+      if (isOwnerSession()) return;
       const map = { 'rail-quota': 'scan_quota', 'evidence-row': 'evidence',
                     'threat-banner': 'scan_quota', 'post-analysis': 'scan_quota' };
       const key = map[cta.dataset.cta] ||
