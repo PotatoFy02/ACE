@@ -52,8 +52,8 @@ else:
 
 FREE_PROJECT_LIMIT = int(os.getenv("FREE_PROJECT_LIMIT", "10"))
 ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "http://localhost:8000").split(",")
-MAX_BODY = 25000
-MAX_UPLOAD = 512000
+MAX_BODY = 50000
+MAX_UPLOAD = 2000000
 ALLOWED_EXT = (".tf", ".hcl", ".yaml", ".yml", ".json", ".txt")
 
 
