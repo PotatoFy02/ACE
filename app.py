@@ -53,7 +53,7 @@ else:
 FREE_PROJECT_LIMIT = int(os.getenv("FREE_PROJECT_LIMIT", "10"))
 ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "http://localhost:8000").split(",")
 MAX_BODY = 25000
-MAX_UPLOAD = 120000
+MAX_UPLOAD = 512000
 ALLOWED_EXT = (".tf", ".hcl", ".yaml", ".yml", ".json", ".txt")
 
 
@@ -243,8 +243,8 @@ async def generate_from_file(request: Request, file: UploadFile = File(...),
         )
 
     raw = await file.read()
-    if len(raw) > 100000:
-        raise HTTPException(413, "File too large (max 100KB).")
+    if len(raw) > 500000:
+        raise HTTPException(413, "File too large (max 500KB).")
     if not raw:
         raise HTTPException(400, "Empty file.")
 
@@ -282,7 +282,7 @@ def generate_from_github(request: Request, req: GithubImportRequest,
         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
             future = executor.submit(fetch_iac_from_repo, req.repo_url, parse_iac)
             try:
-                desc = validate_description(future.result(timeout=25))
+                desc = validate_description(future.result(timeout=55))
             except concurrent.futures.TimeoutError:
                 raise HTTPException(504, "Repository import timed out. Try a smaller repository.")
     except GitHubImportError as e:
