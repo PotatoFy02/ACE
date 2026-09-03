@@ -243,8 +243,8 @@ async def generate_from_file(request: Request, file: UploadFile = File(...),
         )
 
     raw = await file.read()
-    if len(raw) > 500000:
-        raise HTTPException(413, "File too large (max 500KB).")
+    if len(raw) >100000:
+        raise HTTPException(413, "File too large (max 1.5MB).")
     if not raw:
         raise HTTPException(400, "Empty file.")
 
