@@ -15,7 +15,7 @@ from pydantic import BaseModel, Field
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
-
+from github_utils import open_reduction_pr
 from github_import import fetch_iac_from_repo, GitHubImportError, verify_pat_scope
 from generate import generate_threat_model, GenerationCapExceeded
 from auth import verify_token, get_bearer, try_decode, is_owner, require_role, ROLE_RANK, _admin
@@ -573,6 +573,109 @@ async def drift_ingest(request: Request, body: DriftPayload):
             except Exception:
                 log.warning("Slack drift alert failed", exc_info=True)
     return {"ok": True, "drift_detected": body.drift_detected}
+# ── IAM Role Actions ──────────────────────────────────────────────────────────
 
+class RoleActionRequest(BaseModel):
+    role_arn: str
+    ignore_reason: str = ""
+
+
+@app.post("/api/roles/approve")
+@limiter.limit("20/hour")
+async def approve_role(request: Request, body: RoleActionRequest,
+                       user=Depends(verify_token)):
+    from supabase import create_client
+    role_arn = body.role_arn
+    approver = user.get("email") or user.get("sub", "unknown")
+
+    c = create_client(
+        os.getenv("SUPABASE_URL", ""),
+        os.getenv("SUPABASE_SERVICE_KEY", ""),
+    )
+
+    try:
+        c.table("sweeper_roles").update({
+            "state": "PR_OPEN",
+        }).eq("role_arn", role_arn).execute()
+
+        c.table("sweeper_events").insert({
+            "role_arn": role_arn,
+            "from_state": "REDUCTION_READY",
+            "to_state": "PR_OPEN",
+            "reason": f"Approved via app by {approver}",
+            "actor": approver,
+        }).execute()
+
+        c.table("audit_log").insert({
+            "user_id": user.get("sub"),
+            "action": "role_approved",
+            "resource_type": "iam_role",
+            "resource_id": role_arn,
+            "metadata": {"approver": approver},
+        }).execute()
+
+    except Exception:
+        log.exception("Failed to update role state for %s", role_arn)
+        raise HTTPException(500, "Failed to update role state.")
+
+    pr_url = await open_reduction_pr(role_arn)
+
+    if pr_url:
+        try:
+            c.table("sweeper_roles").update({
+                "pr_url": pr_url,
+            }).eq("role_arn", role_arn).execute()
+        except Exception:
+            log.warning("Failed to save pr_url for %s", role_arn)
+
+    return {
+        "ok": True,
+        "role_arn": role_arn,
+        "pr_url": pr_url,
+        "message": f"PR opened: {pr_url}" if pr_url else "State updated. PR creation failed — check logs.",
+    }
+
+
+@app.post("/api/roles/ignore")
+@limiter.limit("20/hour")
+async def ignore_role(request: Request, body: RoleActionRequest,
+                      user=Depends(verify_token)):
+    from supabase import create_client
+    role_arn = body.role_arn
+    actor = user.get("email") or user.get("sub", "unknown")
+    reason = body.ignore_reason or f"Ignored via app by {actor}"
+
+    c = create_client(
+        os.getenv("SUPABASE_URL", ""),
+        os.getenv("SUPABASE_SERVICE_KEY", ""),
+    )
+
+    try:
+        c.table("sweeper_roles").update({
+            "ignore_dormancy": True,
+            "ignore_reason": reason,
+        }).eq("role_arn", role_arn).execute()
+
+        c.table("sweeper_events").insert({
+            "role_arn": role_arn,
+            "from_state": "REDUCTION_READY",
+            "to_state": "ACTIVE",
+            "reason": reason,
+            "actor": actor,
+        }).execute()
+
+        c.table("audit_log").insert({
+            "user_id": user.get("sub"),
+            "action": "role_ignored",
+            "resource_type": "iam_role",
+            "resource_id": role_arn,
+            "metadata": {"reason": reason, "actor": actor},
+        }).execute()
+
+    except Exception:
+        log.exception("Failed to ignore role %s", role_arn)
+        raise HTTPException(500, "Failed to ignore role.")
+
+    return {"ok": True, "role_arn": role_arn}
 
 app.mount("/", StaticFiles(directory="static", html=True), name="static")

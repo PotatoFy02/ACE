@@ -1093,9 +1093,20 @@ const Views = (() => {
                            data-cfg='${escAttr(JSON.stringify({ days: r.days_until_pr, total: 14 }))}' width="40" height="40"></canvas>
                    <div style="font-size:10px;color:var(--ink-4);margin-top:2px">${r.days_until_pr}d left</div>
                  </div>` : ''}
-            ${r.state === 'PR_OPEN' && r.pr_url
+                        ${r.state === 'PR_OPEN' && r.pr_url
               ? `<a href="${esc(safeUrl(r.pr_url))}" target="_blank" rel="noopener noreferrer"
                     class="btn btn--sm" style="margin-top:6px">View PR →</a>` : ''}
+            ${(r.state === 'REDUCTION_READY' || r.state === 'PENDING_REDUCTION')
+              ? `<div class="col" style="gap:6px;margin-top:6px">
+                   <button class="btn btn--sm btn--aurum magnetic"
+                           data-role-approve="${escAttr(r.role_arn)}">
+                     Approve →
+                   </button>
+                   <button class="btn btn--sm btn--ghost"
+                           data-role-ignore="${escAttr(r.role_arn)}">
+                     Ignore
+                   </button>
+                 </div>` : ''}
           </div>
         </div>`).join('');
 
